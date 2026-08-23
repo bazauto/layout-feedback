@@ -142,9 +142,12 @@ directory on the path for the same reason.
 
 ### Traps
 
-- **`MCP23017Pin.update_state()` rate-limits, it does not debounce.** It compares against the
-  time of the last *accepted* change, so its behaviour differs from `InputPinMonitor`'s
-  candidate-and-timer debounce despite the matching method names.
+- **A broken sensor wire reads as `clear`, not `occupied`** (#9). The sensors switch to
+  ground, so an open circuit floats up to the pull-up — the permissive state. The re-assert
+  cannot catch it: the node is alive and republishing. Accepted knowingly.
+- **Pin numbers here are logical and 0-based**, not header positions. Logical 8 is GPB0 on
+  chip pin 1, physically opposite pins 0–7, and header labels are 1-based. Counting has got
+  this wrong twice. Scan all 32 pins and see which one moves instead.
 - **The PN7150 IRQ is not a tag-presence pin.** It asserts when any NCI message is queued.
   Tag presence is inferred by the state machine's periodic T2T read, not by the pin.
 - **Key config on the topic id, not the sensor's display name.** They agreed as of

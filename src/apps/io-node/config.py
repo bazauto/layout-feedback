@@ -39,13 +39,17 @@ I2C_SCL = 5
 EXPANDER_CS = 0x20
 EXPANDER_IR = 0x21
 
-# Measured on the bench 2026-08-23 with a loco standing in Goods Shed and obscuring the
-# beam, so both sensors were known-occupied: both pins read 1, and still read 1 with the
-# internal pull-up disabled, so both are driven rather than floating.
+# The sensors are switches to ground: closed (conducting) when the block is occupied,
+# open otherwise, with the MCP23017's internal pull-up holding the line high when open.
+# So occupied reads 0. Confirmed on the bench 2026-08-23 by scanning all 32 pins with a
+# loco in Goods Shed and again with it removed — pin 8 on both boards was the only one
+# that moved.
 #
-# The pre-split main.py had this as active-low, which inverts the meaning and would have
-# published "clear" for an occupied block.
-ACTIVE_LOW = False
+# **A broken wire reads as `clear`, not `occupied`** (#9). The pull-up gives a defined
+# level on an open circuit, but that level is the permissive one, so a severed wire
+# asserts empty track and the re-assert keeps confirming it. Accepted knowingly for now;
+# see #9 for the closed-circuit alternatives.
+ACTIVE_LOW = True
 
 DEBOUNCE_MS = 200
 

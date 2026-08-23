@@ -53,10 +53,14 @@ def test_pin_n_is_the_same_block_on_both_boards():
         assert cs[pin] == block, "pin %d names different blocks on the two boards" % pin
 
 
-def test_sensors_are_active_high():
-    """Measured on the bench. The pre-split config had this inverted, which would have
-    published `clear` for an occupied block."""
-    assert config.ACTIVE_LOW is False
+def test_sensors_are_active_low():
+    """Switches to ground: closed when occupied, so occupied reads 0.
+
+    Confirmed by scanning all 32 pins with a loco in the block and again with it
+    removed. Note the consequence recorded in #9: a broken wire floats to the pull-up
+    and therefore reads `clear`, which is the permissive state, not the safe one.
+    """
+    assert config.ACTIVE_LOW is True
 
 
 def test_no_outputs_are_configured():
