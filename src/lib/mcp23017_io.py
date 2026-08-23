@@ -130,6 +130,10 @@ class MCP23017Pin:
         self._configured = False
         self._last_state = self._initial_state if self._mode == "output" else 0
         self._last_change_ms = 0
+        # A change in progress: the level seen on the last poll, and when it first
+        # appeared. Cleared whenever the input settles back to the accepted state.
+        self._candidate_state = None
+        self._candidate_since_ms = 0
 
     def setup(self) -> None:
         if self._configured:
@@ -154,23 +158,50 @@ class MCP23017Pin:
     # Input helpers ----------------------------------------------------
 
     def update_state(self) -> bool:
+        """Return True once a changed level has held steady for `debounce_ms`.
+
+        This is a real debounce, not a rate limit. It used to compare `now` against the
+        last *accepted* change, which merely capped how often a change could be reported
+        — a genuinely chattering input was still reported as a change every
+        `debounce_ms`, which for a sensor on the layout means a stream of contradictory
+        occupied/clear readings rather than one settled answer.
+
+        Now a new level must be observed on consecutive polls for the whole debounce
+        window before it counts. A level that bounces back cancels the candidate and
+        nothing is reported. An input chattering faster than the window never settles,
+        so the last stable reading stands — which is the honest answer, since a signal
+        that will not sit still is not evidence of anything.
+        """
         if self._mode != "input":
             raise RuntimeError("update_state() is only valid for input pins")
         if not self._configured:
             raise RuntimeError("Call setup() before update_state().")
 
         current_state = self._device.read_pin(self._bank, self._bit_mask)
+        now = ticks_ms()
+
         if current_state == self._last_state:
+            # Settled back to where it was; abandon any change in progress.
+            self._candidate_state = None
             return False
 
-        now = ticks_ms()
-        if self.debounce_ms:
-            elapsed = ticks_diff(now, self._last_change_ms)
-            if elapsed < self.debounce_ms:
-                return False
+        if not self.debounce_ms:
+            self._last_state = current_state
+            self._last_change_ms = now
+            self._candidate_state = None
+            return True
+
+        if self._candidate_state != current_state:
+            self._candidate_state = current_state
+            self._candidate_since_ms = now
+            return False
+
+        if ticks_diff(now, self._candidate_since_ms) < self.debounce_ms:
+            return False
 
         self._last_state = current_state
         self._last_change_ms = now
+        self._candidate_state = None
         return True
 
     @property
