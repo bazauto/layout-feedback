@@ -217,12 +217,27 @@ class FakeUART:
         self.written = bytearray()
         self._rx = bytearray()
         self.deinit_count = 0
+        # Optional canned response, queued whenever a complete line is written: a
+        # string, or a callable taking the written line and returning a reply (or None
+        # for silence).
+        #
+        # Pre-feeding a reply only works when the client sends its command before
+        # anything drains the queue. `poll()` drains first and *then* reconnects, so a
+        # pre-fed reply is consumed before the command that wanted it is even sent —
+        # which is not how a modem behaves. This answers on demand instead.
+        self.auto_reply = None
 
     # -- device-facing API ---------------------------------------------
 
     def write(self, data):
         payload = data.encode("ascii") if isinstance(data, str) else bytes(data)
         self.written.extend(payload)
+        if self.auto_reply is not None:
+            text = payload.decode("ascii", "replace")
+            for line in text.split("\r\n")[:-1]:  # complete lines only
+                reply = self.auto_reply(line) if callable(self.auto_reply) else self.auto_reply
+                if reply is not None:
+                    self.feed_line(reply)
         return len(payload)
 
     def any(self):

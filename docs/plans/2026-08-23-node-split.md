@@ -135,15 +135,52 @@ The receive path becomes a small state machine over the rx buffer — scan for a
 then consume exactly `<len>` bytes, tolerating a payload split across several `poll()` calls.
 Non-`+MQTTSUBRECV` traffic (`OK`, `ERROR`, `+ETH_GOT_IP`) stays line-oriented.
 
-### D7 — Escaping, with a bench spike before anything is built on it
+### D7 — Escaping works. Settled on the bench, 2026-08-23. ✅
 
-Outbound JSON must survive being embedded in a quoted `AT+MQTTPUB` argument. Escaping `\` and
-`"` *should* work, but whether this modem firmware accepts it is a fact about the hardware, not
-something to reason about. **Step 5 publishes one escaped JSON payload and watches it arrive on
-the broker before anything depends on it.** If the modem mangles it, the transport moves to
-`AT+MQTTPUBRAW`, which sends a length-prefixed raw block.
+**`AT+MQTTPUB` with backslash-escaped payloads is correct on this modem. `AT+MQTTPUBRAW` is
+not needed.** `mqtt_at._escape_at_string()` is sufficient as written.
 
-Finding this out at step 5 costs an afternoon. Finding it out at step 9 costs the design.
+Run with `tools/spike_json_publish.py`. Both payloads arrived on the broker byte-identical to
+what was sent, and both parse:
+
+```
+spike/layout-feedback/json {"state": "occupied"}
+spike/layout-feedback/json {"note": "a \"quoted\" word and a \\ backslash"}
+```
+
+The second is the boundary case — an embedded escaped quote and a literal backslash are the
+two characters that can break out of the AT argument. On the wire that command reads:
+
+```
+AT+MQTTPUB=0,"spike/...","{\"note\": \"a \\\"quoted\\\" word and a \\\\ backslash\"}",1,0
+```
+
+Modem: `OK`, and the broker received the original string. Verified by parsing what arrived,
+not by trusting the modem's `OK` — the modem acknowledging a command says nothing about what
+reached the broker.
+
+### D9 — The sensors are active **high**. The old config had it backwards. ✅
+
+Measured on the bench with a loco standing in Goods Shed and obscuring the beam, so both
+sensors were known-occupied:
+
+| Sensor | Expander | Pin | Reads | Verdict |
+|---|---|---|---|---|
+| `cs---goods-shed` | `0x20` | 8 | 1 | driven high |
+| `ir---goods-shed` | `0x21` | 8 | 1 | driven high |
+
+"Reads 1" alone would have been ambiguous: `create_pin` enables the MCP23017's internal
+pull-up, so an *unwired* input also reads 1. Re-reading each pin with the pull-up **disabled**
+separated the cases — both still read 1, so both are actively driven rather than floating.
+
+**The pre-split `main.py` configured these as `active_low: True`,** which inverts the meaning:
+it would have published `INACTIVE` for an occupied block. For a `block_detection` sensor that
+is precisely the failure the fail-safe rules exist to prevent — a confident `clear` on
+occupied track. `config.py` uses `active_low: False`.
+
+This is strong evidence rather than proof; a pin hard-tied to VCC would look the same. #3's
+bring-up checklist confirms it from the other end by clearing the block and watching the
+reading follow.
 
 ### D8 — RFID is restructured, not implemented
 
@@ -257,6 +294,73 @@ traps list, not left as history.
 
 `python -m pytest` at every step. The bench is needed at step 5 (a design input, not a
 confirmation) and steps 8–9.
+
+## Bring-up results — 2026-08-23 ✅
+
+Six of the seven checks pass. Only the physical trigger is outstanding, because it needs
+someone to move a loco.
+
+| # | Check | Result |
+|---|---|---|
+| 1 | Node connects, modem reports an IP | ✅ `+ETH_GOT_IP:172.18.10.98` |
+| 2 | Both readings on the broker | ✅ correct contract topics |
+| 3 | Contract-shaped: JSON, vocabulary, retained, QoS 1 | ✅ verified with `--retained-only -q 1` |
+| 4 | Both re-assert while nothing changes | ✅ every 22–25 s |
+| 5 | Sensors trusted, block leaves `unknown` | ✅ Goods Shed → `occupied` |
+| 6 | Physically trigger each sensor | ⏳ needs a loco moved |
+| 7 | Node dies → degrade, not a stale reading | ✅ → `unknown` in ~80 s, recovers in ~6 s |
+
+```
+layout/c4e587aa-.../sensor/cs---goods-shed/reading {"state": "occupied"}
+layout/c4e587aa-.../sensor/ir---goods-shed/reading {"state": "occupied"}
+```
+
+Check 3's QoS needed care: `mosquitto_sub`'s reported QoS is the *subscription's*, and a
+message on an established subscription always has the retain flag clear. Neither proves
+anything about the publish. `--retained-only -q 1` does.
+
+Check 7 was run by halting the node, which is worth knowing about in itself — **any
+`mpremote` command interrupts the running script** and takes the node off the air until the
+next reset.
+
+Block identity was confirmed against the layout database rather than inferred:
+`1d89a49e-6737-4f70-96f8-489441277018` is Goods Shed, and both its configured sensors match
+the topics the node publishes.
+
+## Resolved: the broker now accepts LAN connections
+
+**Nothing this repo publishes can reach the orchestrator today.** Measured 2026-08-23:
+
+```
+$ ss -lnt | grep 1883
+LISTEN 0 100  127.0.0.1:1883  0.0.0.0:*
+LISTEN 0 100      [::1]:1883     [::]:*
+```
+
+`/etc/mosquitto/conf.d` is empty and the main config declares no listener, so mosquitto binds
+loopback only. The modem gets a LAN address (`172.18.10.98`) and is refused — the spike's first
+run failed with `+MQTTDISCONNECTED:0` immediately after `AT+MQTTCONN`.
+
+`layout-orchestration`'s deploy skill already records this and names the reason it has not been
+fixed: opening a LAN listener carries an authentication question, and mosquitto 2.x will not
+allow anonymous access on a non-loopback listener without being told to.
+
+**Fixed 2026-08-23** by `/etc/mosquitto/conf.d/lan.conf`:
+
+```
+listener 1883
+allow_anonymous true
+```
+
+The bind address is omitted deliberately, so it covers IPv4, IPv6 and loopback. Writing
+`0.0.0.0` would drop `[::1]`, and declaring any listener removes mosquitto's built-in
+loopback one — so the orchestrator's own `mqtt://localhost:1883` depends on this. Under
+mosquitto 2.x `allow_anonymous true` is required too: anonymous access is only implicit in
+the no-listener mode, so without it every client including the orchestrator is refused.
+
+Anonymous on a private LAN is an accepted, informed trade. The upgrade path is a
+`password_file` and an `acl_file` restricting this node to `sensor/+/reading`; the ACL is
+the part that matters. #7 stays open carrying that.
 
 ## Risks
 
