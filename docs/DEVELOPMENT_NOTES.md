@@ -41,15 +41,14 @@ This document captures the conventions and architectural decisions we have made 
 
 ### UART Bridge (USB <-> UART1)
 
-- `mcu_uart_bridge.py` provides a small poll-driven bridge.
-- By default it forwards external UART1 -> USB console (UART1 pins: TX=GPIO8, RX=GPIO9).
-- It attempts to enable USB->UART forwarding (typing in the USB console is forwarded to UART1) using `uselect.poll()` on `sys.stdin`. Some MicroPython builds may not support polling stdin — the bridge falls back to uni-directional forwarding in that case.
-- To use: instantiate `UARTBridge`, call `setup()`, and call `poll()` regularly from the main loop. The bridge uses non-blocking polls and reads up to 64 bytes when data is available.
+`tools/uart_bridge.py` is a bench tool for talking to the ESP-AT modem by hand — typing AT commands and watching the replies. It is **not deployed to a node**; copy it to a board only when you need to drive the modem directly.
 
-Simple alternative:
+- Forwards external UART1 -> USB console (UART1 pins: TX=GPIO8, RX=GPIO9).
+- Attempts USB->UART forwarding (typing in the USB console reaches UART1) using `uselect.poll()` on `sys.stdin`. Some MicroPython builds cannot poll stdin — the bridge falls back to uni-directional forwarding in that case.
+- As a library: instantiate `UARTBridge`, call `setup()`, and call `poll()` regularly from the main loop. Non-blocking, reads up to 64 bytes when data is available.
+- As a script: run it. `main()` gives a blocking interactive session using `input()`, which works on builds that cannot poll stdin. Set `INTERACTIVE = False` at the top for poll-only mode with a heartbeat.
 
-- `usb_uart_bridge_simple.py` provides a minimal line-oriented bridge that forwards USB console lines to UART1 (and polls UART1 for incoming bytes to print to USB). It defaults to `9600` baud to match your hardware defaults.
-- This script is intentionally blocking when in `INTERACTIVE` mode (uses `input()`), which is robust across MicroPython builds that don't expose selectable stdin. Use the `INTERACTIVE` flag at the top of the file to choose blocking interactive mode or poll-only mode.
+This file replaced three earlier ones — `mcu_uart_bridge.py`, `usb_uart_bridge_simple.py` and `uart_bridge_test.py` — which were three takes on the same tool (#1). The class is unchanged from `mcu_uart_bridge.py`.
 
 ## Future Module Patterns
 
