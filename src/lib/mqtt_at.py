@@ -62,8 +62,95 @@ def _sleep_ms(ms):
         _time.sleep(ms / 1000.0)
 
 
+# --- Frame reading ---------------------------------------------------------
+#
+# Everything the modem emits is a CRLF-terminated ASCII line, with one exception:
+# `+MQTTSUBRECV` carries an arbitrary payload of a declared byte length, and that
+# payload may itself contain CRLF or a double quote. Splitting the stream on CRLF
+# therefore works for `ACTIVE`/`INACTIVE` and corrupts JSON — a payload containing a
+# CRLF arrives as two lines, and the tail is then parsed as a bogus command.
+#
+# So the reader is length-aware: line-oriented for everything else, and byte-counted
+# for a subscribe delivery. See #2.
+
+_SUBRECV_PREFIX = b'+MQTTSUBRECV:'
+_CRLF = b'\r\n'
+
+RECONNECT_BACKOFF_MS = 5000
+
+
+def _take_line(buf):
+    """Take one CRLF-terminated line, or None if it has not fully arrived."""
+    idx = buf.find(_CRLF)
+    if idx == -1:
+        return None
+    return ('line', buf[:idx].decode('ascii', 'replace'), idx + len(_CRLF))
+
+
+def _take_subrecv(buf):
+    """Take one `+MQTTSUBRECV` frame using its declared length.
+
+    Returns None while the frame is still arriving — the payload can be split across
+    several UART reads, and consuming a partial one would corrupt both it and whatever
+    follows. A frame that is malformed rather than incomplete falls back to line
+    handling, so a garbled delivery cannot wedge the buffer forever.
+    """
+    open_quote = buf.find(b'"', len(_SUBRECV_PREFIX))
+    if open_quote == -1:
+        return _take_line(buf)
+    close_quote = buf.find(b'"', open_quote + 1)
+    if close_quote == -1:
+        return None if buf.find(_CRLF) == -1 else _take_line(buf)
+
+    topic = buf[open_quote + 1:close_quote].decode('ascii', 'replace')
+
+    if len(buf) <= close_quote + 1:
+        return None
+    if buf[close_quote + 1:close_quote + 2] != b',':
+        return _take_line(buf)
+
+    digits_start = close_quote + 2
+    cursor = digits_start
+    while cursor < len(buf) and 0x30 <= buf[cursor] <= 0x39:
+        cursor += 1
+    if cursor == digits_start:
+        return _take_line(buf)
+    if cursor >= len(buf):
+        return None  # the length itself may still be arriving
+    if buf[cursor:cursor + 1] != b',':
+        return _take_line(buf)
+
+    length = int(buf[digits_start:cursor])
+    payload_start = cursor + 1
+    payload_end = payload_start + length
+    if len(buf) < payload_end:
+        return None  # payload still in flight
+
+    payload = buf[payload_start:payload_end].decode('ascii', 'replace')
+    consumed = payload_end
+    # The modem appends its own CRLF after the payload. Eat it so it is not mistaken
+    # for an empty line.
+    if buf[consumed:consumed + len(_CRLF)] == _CRLF:
+        consumed += len(_CRLF)
+    return ('message', (topic, payload), consumed)
+
+
+def _take_frame(buf):
+    """Take one frame from the front of `buf`.
+
+    Returns `(kind, value, consumed)` where kind is 'line' (value is the text) or
+    'message' (value is a `(topic, payload)` pair), or None when `buf` does not yet
+    hold a complete frame.
+    """
+    if not buf:
+        return None
+    if buf.startswith(_SUBRECV_PREFIX):
+        return _take_subrecv(buf)
+    return _take_line(buf)
+
+
 class MQTTATClient:
-    def __init__(self, host: str, port: int = 1883, uart=None, uart_id=1, tx_pin=8, rx_pin=9, baud=115200, keepalive: int = 1, timeout_ms=2000, debug: bool = False):
+    def __init__(self, host: str, port: int = 1883, uart=None, uart_id=1, tx_pin=8, rx_pin=9, baud=115200, keepalive: int = 1, timeout_ms=2000, debug: bool = False, client_id: str = 'sensors'):
         """Create client bound to a single broker address.
 
         - `host` and `port` are used to connect on `setup()` and kept for diagnostics.
@@ -72,6 +159,9 @@ class MQTTATClient:
         self.host = host
         self.port = port
         self.keepalive = keepalive
+        # Distinct per node: two clients sharing an MQTT client id knock each other off
+        # the broker in a reconnect loop, which looks exactly like flaky hardware.
+        self.client_id = client_id
         self.uart_id = uart_id
         self.tx_pin = tx_pin
         self.rx_pin = rx_pin
@@ -93,6 +183,14 @@ class MQTTATClient:
         # recent raw lines received from modem (for diagnostics)
         self._recent_lines = []
         self._max_recent_lines = 200
+        # Broker link state, driven by the modem's own +MQTTCONNECTED /
+        # +MQTTDISCONNECTED notifications rather than inferred from command results.
+        self.connected = False
+        self.reconnect_backoff_ms = RECONNECT_BACKOFF_MS
+        self._next_reconnect_ms = None
+        self._busy = False
+        self._subscriptions = []
+        self._lwt = None
 
     def setup(self):
         """Initialise UART, apply base config and connect to broker.
@@ -116,49 +214,32 @@ class MQTTATClient:
         # the module typically prints 'ready' then '+ETH_GOT_IP:<ip>' when ready.
         got_ip = self.wait_for_line('+ETH_GOT_IP:', timeout_ms=30000)
         if not got_ip:
-            try:
-                print('--- modem response (post-reset) ---')
-                for ln in self._recent_lines:
-                    print(ln)
-                print('--- end modem response ---')
-            except Exception:
-                pass
+            self._dump('post-reset')
             raise RuntimeError('Network device did not report IP after reset')
 
-        # send base config then connect; wait for OK/ERROR responses
-        config_cmd = 'AT+MQTTUSERCFG=0,1,"sensors","","",0,0,""'
-        try:
-            ok = self.send_at_and_wait(config_cmd, timeout_ms=50000)
-            if not ok:
-                # dump recent modem lines for diagnostics
-                try:
-                    print('--- modem response (base config) ---')
-                    for ln in self._recent_lines:
-                        print(ln)
-                    print('--- end modem response ---')
-                except Exception:
-                    pass
-                raise RuntimeError('set_base_config returned ERROR or timed out')
-        except Exception as e:
-            self._log('set_base_config failed: %s' % e)
-            raise
+        config_cmd = 'AT+MQTTUSERCFG=0,1,"%s","","",0,0,""' % self.client_id
+        if not self.send_at_and_wait(config_cmd, timeout_ms=50000):
+            self._dump('base config')
+            raise RuntimeError('set_base_config returned ERROR or timed out')
 
-        conn_cmd = f'AT+MQTTCONN=0,"{self.host}",{self.port},{self.keepalive}'
-        try:
-            ok = self.send_at_and_wait(conn_cmd, timeout_ms=5000)
-            if not ok:
-                # dump recent modem lines for diagnostics
-                try:
-                    print('--- modem response (connect) ---')
-                    for ln in self._recent_lines:
-                        print(ln)
-                    print('--- end modem response ---')
-                except Exception:
-                    pass
-                raise RuntimeError('connect returned ERROR or timed out')
-        except Exception as e:
-            self._log('connect failed: %s' % e)
-            raise
+        # The will, if one was registered, has to be in place before the connect —
+        # the broker only reads it at connection time.
+        if not self._apply_lwt():
+            self._dump('lwt config')
+            raise RuntimeError('AT+MQTTCONNCFG returned ERROR or timed out')
+
+        if not self._connect():
+            self._dump('connect')
+            raise RuntimeError('connect returned ERROR or timed out')
+
+        # `_connect()` returning True only means the modem accepted the command. The
+        # broker link is confirmed by the modem's own +MQTTCONNECTED notification,
+        # which `_handle_line` records — so wait for it rather than assuming.
+        if not self.connected:
+            if self.wait_for_line('+MQTTCONNECTED', timeout_ms=5000) is None:
+                self._dump('connect')
+                raise RuntimeError('modem accepted AT+MQTTCONN but never reported +MQTTCONNECTED')
+        self._next_reconnect_ms = None
 
     def _write_line(self, line: str):
         if self.uart is None:
@@ -177,6 +258,29 @@ class MQTTATClient:
         try:
             if self.debug:
                 print('[MQTTAT]', msg)
+        except Exception:
+            pass
+
+    def _mark_command_boundary(self):
+        """Remember where the current command starts in the diagnostics ring."""
+        self._command_start_idx = len(self._recent_lines)
+
+    def lines_since_command(self):
+        """Modem output since the last command was sent.
+
+        What a failure dump wants: the replies to *this* command, not the whole ring.
+        """
+        try:
+            return self._recent_lines[getattr(self, '_command_start_idx', 0):]
+        except Exception:
+            return list(self._recent_lines)
+
+    def _dump(self, label):
+        try:
+            print('--- modem response (%s) ---' % label)
+            for line in self.lines_since_command():
+                print(line)
+            print('--- end modem response ---')
         except Exception:
             pass
 
@@ -212,15 +316,99 @@ class MQTTATClient:
             _sleep_ms(50)
         return None
 
-    def subscribe(self, topic: str, qos: int = 0):
-        cmd = f'AT+MQTTSUB=0,"{topic}",{qos}'
-        ok = self.send_at_and_wait(cmd)
+    def subscribe(self, topic: str, qos: int = 0) -> bool:
+        """Subscribe, and remember it so a reconnect can restore it.
 
-    def publish(self, topic: str, message: str, qos: int = 0, retain: int = 0):
+        A subscription does not survive the broker connection dropping. Without the
+        bookkeeping below, a node that reconnects goes deaf: it looks healthy, keeps
+        publishing, and silently stops receiving.
+        """
+        cmd = 'AT+MQTTSUB=0,"%s",%d' % (self._escape_at_string(topic), int(qos))
+        ok = self.send_at_and_wait(cmd)
+        if ok:
+            if (topic, qos) not in self._subscriptions:
+                self._subscriptions.append((topic, qos))
+        else:
+            self._log('subscribe FAILED: %s' % topic)
+        return ok
+
+    def publish(self, topic: str, message: str, qos: int = 0, retain: int = 0) -> bool:
+        """Publish, returning whether the modem accepted the command.
+
+        **The return value must be checked.** This used to be discarded, which meant a
+        node whose broker had gone away carried on publishing into nothing and reporting
+        success — the failure mode where the layout believes it has sensor coverage it
+        does not have.
+
+        A True here means the modem took the command, not that a subscriber received it.
+        """
         esc_topic = self._escape_at_string(topic)
         esc_msg = self._escape_at_string(message)
         cmd = 'AT+MQTTPUB=0,"%s","%s",%d,%d' % (esc_topic, esc_msg, int(qos), int(retain))
         ok = self.send_at_and_wait(cmd)
+        if not ok:
+            self._log('publish FAILED: %s' % topic)
+            # The modem refusing a publish is the first sign the link has gone, and it
+            # is not always accompanied by a +MQTTDISCONNECTED. Arm the reconnect.
+            if self._next_reconnect_ms is None:
+                self._next_reconnect_ms = _now_ms() + self.reconnect_backoff_ms
+        return ok
+
+    def configure_lwt(self, topic: str, message: str, qos: int = 1, retain: int = 1):
+        """Register a Last Will, applied on the next connect.
+
+        Must be set before `setup()`: ESP-AT carries the will in `AT+MQTTCONNCFG`,
+        which the broker only reads at connection time.
+
+        **Nothing in this repo currently uses this.** A sensor node has no business
+        publishing a will to `layout/{id}/system/status` — that topic belongs to the
+        orchestrator, which registers it as its own LWT, so a node dying there would
+        overwrite the orchestrator's status with "offline". Sensor liveness is the 30 s
+        re-assert and the backend's freshness window instead. Kept because a future
+        device-status topic would need it.
+        """
+        self._lwt = (topic, message, int(qos), int(retain))
+
+    def _apply_lwt(self) -> bool:
+        if self._lwt is None:
+            return True
+        topic, message, qos, retain = self._lwt
+        cmd = 'AT+MQTTCONNCFG=0,%d,0,"%s","%s",%d,%d' % (
+            self.keepalive, self._escape_at_string(topic),
+            self._escape_at_string(message), qos, retain,
+        )
+        ok = self.send_at_and_wait(cmd)
+        if not ok:
+            self._log('LWT config FAILED')
+        return ok
+
+    def _maybe_reconnect(self):
+        """Retry a dropped broker connection, at most once per backoff interval.
+
+        Skipped while a command is in flight: `send_at_and_wait()` calls `poll()` in its
+        wait loop, so reconnecting from there would re-enter the modem mid-command.
+        """
+        if self._busy or self._next_reconnect_ms is None:
+            return
+        if _now_ms() < self._next_reconnect_ms:
+            return
+
+        self._next_reconnect_ms = _now_ms() + self.reconnect_backoff_ms
+        self._log('reconnecting to %s:%d' % (self.host, self.port))
+
+        if not self._connect():
+            return
+
+        # Subscriptions do not survive the disconnect; restore them.
+        for topic, qos in list(self._subscriptions):
+            cmd = 'AT+MQTTSUB=0,"%s",%d' % (self._escape_at_string(topic), int(qos))
+            if not self.send_at_and_wait(cmd):
+                self._log('re-subscribe FAILED: %s' % topic)
+
+    def _connect(self) -> bool:
+        cmd = 'AT+MQTTCONN=0,"%s",%d,%d' % (
+            self._escape_at_string(self.host), self.port, self.keepalive)
+        return self.send_at_and_wait(cmd, timeout_ms=10000)
 
     def ping(self, host: str):
         cmd = f'AT+PING="{host}"'
@@ -249,7 +437,7 @@ class MQTTATClient:
         self._raw_handlers.append(callback)
 
     def poll(self):
-        """Read available UART bytes, split into lines, and dispatch handlers."""
+        """Read available UART bytes, split into frames, and dispatch handlers."""
         if self.uart is None:
             return
         try:
@@ -262,67 +450,84 @@ class MQTTATClient:
                 data = self.uart.read(any_bytes)
             except Exception:
                 data = None
-            if not data:
-                return
-            # append bytes
-            try:
-                self._rx_buffer += data
-            except Exception:
-                return
-                # process CRLF-terminated ASCII lines (firmware uses ASCII + CRLF)
-            while True:
-                sep = b'\r\n'
-                idx = self._rx_buffer.find(sep)
-                if idx == -1:
-                    break
-                raw_bytes = self._rx_buffer[:idx]
-                # remove processed bytes including CRLF
-                self._rx_buffer = self._rx_buffer[idx+2:]
+            if data:
                 try:
-                    raw_line = raw_bytes.decode('ascii', 'replace')
-                except Exception:
-                    raw_line = raw_bytes.decode('ascii', 'ignore')
-
-                if self.debug:
-                    self._log('RX: %s' % raw_line)
-
-                # record for diagnostics (bounded) for every received line
-                try:
-                    self._recent_lines.append(raw_line)
-                    if len(self._recent_lines) > self._max_recent_lines:
-                        # drop oldest
-                        self._recent_lines.pop(0)
+                    self._rx_buffer += data
                 except Exception:
                     pass
-                for cb in list(self._raw_handlers):
+
+        # Drain whatever is complete, on every poll rather than only when new bytes
+        # arrived — a frame completed by the previous read must not sit in the buffer
+        # waiting for unrelated traffic to shake it loose.
+        while True:
+            frame = _take_frame(self._rx_buffer)
+            if frame is None:
+                break
+            kind, value, consumed = frame
+            self._rx_buffer = self._rx_buffer[consumed:]
+            if kind == 'line':
+                self._handle_line(value)
+            else:
+                self._handle_message(value[0], value[1])
+
+        self._maybe_reconnect()
+
+    def _record_line(self, text):
+        try:
+            self._recent_lines.append(text)
+            if len(self._recent_lines) > self._max_recent_lines:
+                self._recent_lines.pop(0)
+        except Exception:
+            pass
+
+    def _handle_line(self, raw_line):
+        if self.debug:
+            self._log('RX: %s' % raw_line)
+        self._record_line(raw_line)
+
+        for cb in list(self._raw_handlers):
+            try:
+                cb(raw_line)
+            except Exception:
+                pass
+
+        s = raw_line.strip()
+
+        # Connection state. The modem announces both unprompted, so this is the only
+        # honest source of truth about whether the broker is actually reachable — a
+        # successful AT+MQTTPUB only means the modem accepted the command.
+        if s.startswith('+MQTTCONNECTED'):
+            self.connected = True
+            self._next_reconnect_ms = None
+            self._log('broker connected')
+        elif s.startswith('+MQTTDISCONNECTED'):
+            if self.connected:
+                self._log('broker disconnected')
+            self.connected = False
+            if self._next_reconnect_ms is None:
+                self._next_reconnect_ms = _now_ms() + self.reconnect_backoff_ms
+
+        if s == 'OK' or s == 'ERROR':
+            self._last_status = s
+            for sh in list(self._status_handlers):
+                try:
+                    sh(s)
+                except Exception:
+                    pass
+
+    def _handle_message(self, topic, payload):
+        if self.debug:
+            self._log('RX message: %s -> %s' % (topic, payload))
+        # Recorded in its wire form so the diagnostics dump reads like the stream did.
+        self._record_line('+MQTTSUBRECV:0,"%s",%d,%s' % (topic, len(payload), payload))
+
+        for topic_prefix, callbacks in list(self._topic_handlers.items()):
+            if topic.startswith(topic_prefix):
+                for cb in list(callbacks):
                     try:
-                        cb(raw_line)
+                        cb(topic, payload)
                     except Exception:
                         pass
-
-                # check for OK/ERROR status lines
-                s = raw_line.strip()
-                if s == 'OK' or s == 'ERROR':
-                    self._last_status = s
-                    for sh in list(self._status_handlers):
-                        try:
-                            sh(s)
-                        except Exception:
-                            pass
-                    # do not treat OK/ERROR as mqtt message lines
-                    continue
-
-                # parse +MQTTSUBRECV lines into (topic, payload) and dispatch
-                parsed = self._parse_mqttsubrecv(raw_line)
-                if parsed is not None:
-                    topic, payload = parsed
-                    for topic_prefix, callbacks in list(self._topic_handlers.items()):
-                        if topic.startswith(topic_prefix):
-                            for cb in list(callbacks):
-                                try:
-                                    cb(topic, payload)
-                                except Exception:
-                                    pass
 
     # Utility helper for convenience
     def publish_json(self, topic: str, obj):
@@ -351,24 +556,32 @@ class MQTTATClient:
         """
         if timeout_ms is None:
             timeout_ms = int(self.timeout_ms)
-        # reset previous status
         self._last_status = None
-        # reset previous status and recent lines
-        self._recent_lines = []
-        self._write_line(cmd)
-        deadline = _now_ms() + int(timeout_ms)
-        while _now_ms() <= deadline:
-            # process any incoming bytes/lines
-            try:
-                self.poll()
-            except Exception:
-                pass
+        # `_recent_lines` is deliberately NOT cleared here. It used to be, which threw
+        # away the diagnostics on every command — including the lines this command's own
+        # failure dump was about to print, and the ones `wait_for_line()` was scanning
+        # for. It is a bounded ring; let it ring.
+        self._mark_command_boundary()
 
-            if self._last_status is not None:
-                s = self._last_status
-                self._last_status = None
-                return s == 'OK'
-            _sleep_ms(10)
+        # Guards `_maybe_reconnect()`: poll() runs inside the wait loop below, and
+        # reconnecting from there would re-enter the modem in the middle of this command.
+        self._busy = True
+        try:
+            self._write_line(cmd)
+            deadline = _now_ms() + int(timeout_ms)
+            while _now_ms() <= deadline:
+                try:
+                    self.poll()
+                except Exception:
+                    pass
+
+                if self._last_status is not None:
+                    s = self._last_status
+                    self._last_status = None
+                    return s == 'OK'
+                _sleep_ms(10)
+        finally:
+            self._busy = False
 
         # On timeout/failure, flush any remaining bytes in the rx buffer
         try:
@@ -415,41 +628,31 @@ class MQTTATClient:
 
     @staticmethod
     def _parse_mqttsubrecv_line(raw_line: str):
-        """Parse a `+MQTTSUBRECV` ASCII line and return (topic, payload) or None.
+        """Parse one complete `+MQTTSUBRECV` frame and return (topic, payload) or None.
 
-        Expected format:
             +MQTTSUBRECV:0,"topic",<len>,data
 
-        This performs simple string parsing and assumes the modem always sends
-        full ASCII lines terminated by CRLF.
+        A thin wrapper over the same length-aware reader `poll()` uses, so there is one
+        parser rather than two that disagree at the edges.
+
+        **The declared length is now honoured.** The previous implementation took
+        everything after the third comma up to the end of the line, which quietly
+        produced a wrong answer whenever the declared length and the available bytes
+        disagreed — the case a truncated or split frame always presents. A frame whose
+        payload is shorter than its declared length is incomplete, not a short message,
+        and returns None here.
         """
-        prefix = '+MQTTSUBRECV:'
         if not isinstance(raw_line, str):
             return None
-        if not raw_line.startswith(prefix):
+        buf = raw_line.encode('ascii', 'replace')
+        if not buf.endswith(_CRLF):
+            buf += _CRLF
+        if not buf.startswith(_SUBRECV_PREFIX):
             return None
-        try:
-            rest = raw_line[len(prefix):]
-            q1 = rest.find('"')
-            if q1 == -1:
-                return None
-            q2 = rest.find('"', q1+1)
-            if q2 == -1:
-                return None
-            topic = rest[q1+1:q2]
-            after = rest[q2+1:]
-            if after.startswith(','):
-                after = after[1:]
-            c = after.find(',')
-            if c == -1:
-                payload = ''
-            else:
-                payload = after[c+1:]
-                if payload.startswith('"') and payload.endswith('"') and len(payload) >= 2:
-                    payload = payload[1:-1]
-            return topic, payload
-        except Exception:
+        frame = _take_frame(buf)
+        if frame is None or frame[0] != 'message':
             return None
+        return frame[1]
 
 # expose parser alias for unit tests
 try:
