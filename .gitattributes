@@ -1,0 +1,13 @@
+# Shell scripts must keep LF endings. Git's autocrlf would otherwise check them out
+# with CRLF on Windows, and bash fails with "$'\r': command not found" — which silently
+# breaks the .claude hooks and scripts/run_tests.sh.
+*.sh text eol=lf
+
+# Same for anything a Linux CI runner consumes directly.
+*.yml text eol=lf
+*.yaml text eol=lf
+
+# MicroPython source is deployed to the Pico's filesystem by mpremote and read by a
+# MicroPython interpreter, not by Windows. Keep it LF so what runs on the board matches
+# what is in the repo.
+*.py text eol=lf

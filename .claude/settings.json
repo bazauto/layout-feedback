@@ -1,0 +1,26 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m pytest:*)",
+      "Bash(python -m pytest)",
+      "Bash(bash scripts/run_tests.sh:*)",
+      "Bash(python -m ruff check:*)",
+      "Bash(python -m mpremote devs)"
+    ]
+  },
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/verify-tests.sh\"",
+            "shell": "bash",
+            "timeout": 120,
+            "statusMessage": "Host tests"
+          }
+        ]
+      }
+    ]
+  }
+}
