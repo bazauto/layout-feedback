@@ -295,7 +295,39 @@ traps list, not left as history.
 `python -m pytest` at every step. The bench is needed at step 5 (a design input, not a
 confirmation) and steps 8–9.
 
-## Blocked: the broker does not accept LAN connections
+## Bring-up results — 2026-08-23 ✅
+
+Six of the seven checks pass. Only the physical trigger is outstanding, because it needs
+someone to move a loco.
+
+| # | Check | Result |
+|---|---|---|
+| 1 | Node connects, modem reports an IP | ✅ `+ETH_GOT_IP:172.18.10.98` |
+| 2 | Both readings on the broker | ✅ correct contract topics |
+| 3 | Contract-shaped: JSON, vocabulary, retained, QoS 1 | ✅ verified with `--retained-only -q 1` |
+| 4 | Both re-assert while nothing changes | ✅ every 22–25 s |
+| 5 | Sensors trusted, block leaves `unknown` | ✅ Goods Shed → `occupied` |
+| 6 | Physically trigger each sensor | ⏳ needs a loco moved |
+| 7 | Node dies → degrade, not a stale reading | ✅ → `unknown` in ~80 s, recovers in ~6 s |
+
+```
+layout/c4e587aa-.../sensor/cs---goods-shed/reading {"state": "occupied"}
+layout/c4e587aa-.../sensor/ir---goods-shed/reading {"state": "occupied"}
+```
+
+Check 3's QoS needed care: `mosquitto_sub`'s reported QoS is the *subscription's*, and a
+message on an established subscription always has the retain flag clear. Neither proves
+anything about the publish. `--retained-only -q 1` does.
+
+Check 7 was run by halting the node, which is worth knowing about in itself — **any
+`mpremote` command interrupts the running script** and takes the node off the air until the
+next reset.
+
+Block identity was confirmed against the layout database rather than inferred:
+`1d89a49e-6737-4f70-96f8-489441277018` is Goods Shed, and both its configured sensors match
+the topics the node publishes.
+
+## Resolved: the broker now accepts LAN connections
 
 **Nothing this repo publishes can reach the orchestrator today.** Measured 2026-08-23:
 
@@ -313,9 +345,22 @@ run failed with `+MQTTDISCONNECTED:0` immediately after `AT+MQTTCONN`.
 fixed: opening a LAN listener carries an authentication question, and mosquitto 2.x will not
 allow anonymous access on a non-loopback listener without being told to.
 
-This blocks step 9 entirely and is tracked as #7. The spike was completed against a throwaway
-broker on port 1884, started and killed inside the same session, which touched neither the
-production broker's config nor its persistence store.
+**Fixed 2026-08-23** by `/etc/mosquitto/conf.d/lan.conf`:
+
+```
+listener 1883
+allow_anonymous true
+```
+
+The bind address is omitted deliberately, so it covers IPv4, IPv6 and loopback. Writing
+`0.0.0.0` would drop `[::1]`, and declaring any listener removes mosquitto's built-in
+loopback one — so the orchestrator's own `mqtt://localhost:1883` depends on this. Under
+mosquitto 2.x `allow_anonymous true` is required too: anonymous access is only implicit in
+the no-listener mode, so without it every client including the orchestrator is refused.
+
+Anonymous on a private LAN is an accepted, informed trade. The upgrade path is a
+`password_file` and an `acl_file` restricting this node to `sensor/+/reading`; the ACL is
+the part that matters. #7 stays open carrying that.
 
 ## Risks
 

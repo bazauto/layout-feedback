@@ -56,9 +56,11 @@ if [ "$DRY_RUN" = 1 ]; then
   exit 0
 fi
 
+# scp rather than rsync: Git Bash on Windows ships no rsync, and the staging directory
+# is wiped first, so there is nothing for --delete to do that rm has not already done.
 ssh "$BENCH" "bash -lc 'rm -rf $STAGING/$NODE && mkdir -p $STAGING/$NODE/lib $STAGING/$NODE/app'" || exit 1
-rsync -az --delete src/lib/ "$BENCH:$STAGING/$NODE/lib/" || exit 1
-rsync -az --delete "$APP_DIR/" "$BENCH:$STAGING/$NODE/app/" || exit 1
+scp -q src/lib/*.py "$BENCH:$STAGING/$NODE/lib/" || exit 1
+scp -q "$APP_DIR"/*.py "$BENCH:$STAGING/$NODE/app/" || exit 1
 
 echo "== copying to the board =="
 # Note on sys.path: MicroPython searches '' (the filesystem root) BEFORE /lib. A stale

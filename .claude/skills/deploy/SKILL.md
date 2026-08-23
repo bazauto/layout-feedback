@@ -56,16 +56,30 @@ bash scripts/deploy.sh io-node          # or rfid-node
 bash scripts/deploy.sh io-node --dry-run
 ```
 
-That is the whole task. The script rsyncs `src/lib/` and `src/apps/<node>/` to a staging
-directory on the bench, then runs `mpremote` there to copy `lib/` to the board's `/lib` and the
-app's `main.py` and `config.py` to `/`, and soft-resets.
+That is the whole task. The script stages `src/lib/` and `src/apps/<node>/` on the bench with
+`scp` (Git Bash on Windows has no `rsync`), then runs `mpremote` there to copy `lib/` to the
+board's `/lib` and the app's `main.py` and `config.py` to `/`, and resets. It refuses to deploy
+past a red host suite, because the suite validates the very config being deployed.
 
-Do not drive `mpremote`, `rsync` or `scp` by hand when the script exists. Reaching the same
-answer manually costs a great deal of context and gets the `by-id` path wrong.
+Do not drive `mpremote` or `scp` by hand when the script exists. Reaching the same answer
+manually costs a great deal of context and gets the `by-id` path wrong.
+
+## Two things that will catch you out
+
+**Any `mpremote` command stops the running node.** It interrupts whatever is executing and
+drops the board into the raw REPL, so a "harmless" `fs ls` silently takes the node off the air
+until the next `reset`. If you inspect a board mid-session, `mpremote ... reset` afterwards or
+it stays down — and the orchestrator will degrade its blocks to `unknown` about 90 seconds
+later.
+
+**The filesystem root shadows `/lib`.** `sys.path` is `['', '.frozen', '/lib']`, so a stale
+module left at the root wins over the one just deployed, and the board silently runs old code.
+`deploy.sh` clears root `.py` files it does not own before copying, which is why the first real
+deploy removed fourteen leftovers from the pre-restructure layout.
 
 ## Reading the board directly
 
-Safe, and they do not reset it:
+These do not change anything, but they **do** stop the running node — see above:
 
 ```bash
 ssh pbarrett@172.18.10.240 'bash -lc "mpremote connect id:0d9a62134acbf42d fs ls"'
