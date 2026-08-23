@@ -1,11 +1,26 @@
+"""Pre-split combined application — IO, NFC and MQTT in one script.
+
+**This file is on its way out and nothing new should be added to it.** It is kept
+running only so the board still works between the restructure (#1) and the node split.
+`src/apps/io-node/` replaces its IO half (#3) and `src/apps/rfid-node/` its NFC half
+(#4), after which it is deleted.
+
+Its imports resolve on the device because `src/lib/*` is deployed to `/lib`, which
+MicroPython puts on `sys.path`. They do not resolve on the host, and that is fine —
+nothing imports this file.
+
+What it publishes does **not** meet the orchestrator's MQTT contract: the topics are
+`track/sensor/{name}`, the payloads are bare `ACTIVE`/`INACTIVE` strings, nothing is
+retained, and nothing is re-asserted. See #2.
+"""
+
 from machine import Pin, I2C
 from utime import sleep
 
 from input_pin_monitor import InputPinMonitor
 from mcp23017_io import MCP23017Expander
 from pcf8591_adc import PCF8591ADC
-from mcu_uart_bridge import UARTBridge
-from pn7150_mux_reader import PN7150MuxManager
+from pn7150 import PN7150MuxManager
 from mqtt_at import MQTTATClient
 
 

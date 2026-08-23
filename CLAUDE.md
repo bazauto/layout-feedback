@@ -100,17 +100,28 @@ bench check that covers it instead. Do not leave it silently untested.
 
 ## Current state (2026-08)
 
-**Pre-restructure.** The repo is currently a flat directory of working experiments, being
-split into two deployable nodes. Until that lands, treat the file list below as the map:
+Restructured (#1); the node split itself is still to come.
 
-- `mqtt_at.py` — ESP-AT MQTT client over UART1. The transport everything needs.
-- `input_pin_monitor.py` — native Pico GPIO, IRQ + timer debounce. Not yet wired into `main.py`.
-- `mcp23017_io.py`, `pcf8591_adc.py` — I2C expander and ADC drivers.
-- `pn7150_mux_reader.py` — PN7150 + mux, callback-based. **The keeper.**
-- `pn7150_mux_state_machine.py` — a near-duplicate of the above with its own `main()`.
-- `mcu_uart_bridge.py`, `usb_uart_bridge_simple.py`, `uart_bridge_test.py` — three takes on
-  one USB↔UART debug tool.
-- `main.py` — flat top-level script doing IO, NFC and MQTT at once.
+```
+src/lib/     -> device /lib
+  mqtt_at.py            ESP-AT MQTT client over UART1. The transport everything needs.
+  input_pin_monitor.py  Native Pico GPIO, IRQ + timer debounce. Currently unused.
+  mcp23017_io.py        I2C expander, in and out. Poll-only.
+  pcf8591_adc.py        I2C ADC. Wired to nothing; no contract topic for analog yet.
+  pn7150.py             PN7150 + TCA9548A mux, callback-based.
+tools/       host-side, never deployed
+  uart_bridge.py        Talk to the ESP-AT modem by hand. Run it for an interactive session.
+  mqtt_example.py       Minimal publish/subscribe against a real modem.
+tests/       host pytest; conftest.py stubs `machine` and `utime`
+main.py      pre-split combined app, on its way out (#3, #4)
+```
+
+Because `src/lib/*` is deployed to `/lib`, which MicroPython puts on `sys.path`, a node
+imports `mqtt_at` and not `lib.mqtt_at`. `pytest.ini` puts `src/lib` on the path for the
+same reason, so tests import device modules by exactly the name the board uses.
+
+**`src/apps/io-node/` and `src/apps/rfid-node/` do not exist yet** — #3 and #4 create them,
+and `main.py` is deleted when they do.
 
 ### Traps
 

@@ -1,16 +1,29 @@
 """UART1 bridge: forward data received on UART1 (GPIO8/9) to the USB REPL.
 
-Usage:
-    from mcu_uart_bridge import UARTBridge
+A bench tool for talking to the ESP-AT modem by hand — typing AT commands and
+watching the replies. It is **not deployed to a node**; copy it to a board only when
+you need to drive the modem directly.
 
-    bridge = UARTBridge(uart_id=1, tx_pin=8, rx_pin=9, baud=115200)
+Usage:
+    from uart_bridge import UARTBridge
+
+    bridge = UARTBridge(uart_id=1, tx_pin=8, rx_pin=9, baud=9600)
     bridge.setup()
 
     # in your main loop:
     bridge.poll()
 
+Or run it as a script for a blocking interactive session — see `main()` at the bottom.
+
 This module intentionally forwards incoming bytes to `sys.stdout.write()`
 instead of touching UART(0) to avoid stomping the USB REPL configuration.
+
+Consolidated from `mcu_uart_bridge.py`, `usb_uart_bridge_simple.py` and
+`uart_bridge_test.py`, which were three takes on this one tool (#1). The class below
+is unchanged from `mcu_uart_bridge.py` — a restructure is not the place to rewrite a
+tool that can only be tested against real hardware. The other two are gone: the
+"simple" variant was a line-oriented reimplementation of `interactive_mode()`, and the
+"test" harness is now `main()`.
 """
 
 from machine import UART, Pin
@@ -303,3 +316,55 @@ class UARTBridge:
         except KeyboardInterrupt:
             # user cancelled interactive mode
             return
+
+
+# --- Running this file directly -------------------------------------------
+#
+# Was `uart_bridge_test.py`. Isolates the bridge from everything else so you can
+# confirm the loop stays alive and see forwarded bytes, without a node's monitors
+# running alongside.
+
+# Blocking interactive session (type AT commands) vs. poll-only (watch the UART).
+INTERACTIVE = True
+
+BAUD = 9600
+UART_ID = 1
+TX_PIN = 8
+RX_PIN = 9
+
+
+def main():
+    from utime import sleep, ticks_ms
+
+    bridge = UARTBridge(uart_id=UART_ID, tx_pin=TX_PIN, rx_pin=RX_PIN, baud=BAUD)
+    bridge.debug = True
+    bridge.setup()
+    print("UART bridge config:", bridge.config_summary())
+
+    if INTERACTIVE:
+        bridge.interactive_mode()
+        bridge.close()
+        print("UART bridge interactive session ended")
+        return
+
+    last_heartbeat = ticks_ms()
+    try:
+        while True:
+            forwarded = bridge.poll()
+            if forwarded:
+                print("forwarded bytes:", forwarded)
+
+            if ticks_ms() - last_heartbeat > 5000:
+                print("heartbeat")
+                last_heartbeat = ticks_ms()
+
+            sleep(0.05)
+    except KeyboardInterrupt:
+        print("Interrupted by user")
+    finally:
+        bridge.close()
+        print("UART bridge finished")
+
+
+if __name__ == "__main__":
+    main()

@@ -1,50 +1,71 @@
-PicoLayoutFeedback — MQTT AT bridge (MicroPython)
+# layout-feedback
 
-Overview
-- `mqtt_at.py`: AT-command based MQTT helper for MicroPython. It sends AT MQTT commands
-  to an external modem over a UART and parses incoming `+MQTTSUBRECV` lines.
-- Designed for simple publish/subscribe integration between input/output modules
-  in the Pico-based monitoring app.
+MicroPython firmware for the Raspberry Pi Pico nodes that connect layout hardware — block
+detectors, IO expanders, RFID readers — to MQTT, for the Westgate Hollow model railway.
 
-Quick usage
-- Create the client (constructor takes broker host/port):
+Part of a four-repo control stack:
+[layout-orchestration](https://github.com/bazauto/layout-orchestration) (backend and operator
+UI), [PicoDCC](https://github.com/bazauto/PicoDCC) (DCC command station),
+[esp-layout-controller](https://github.com/bazauto/esp-layout-controller) (touchscreen
+throttle), and this.
 
-  from mqtt_at import MQTTATClient
-  client = MQTTATClient('172.18.10.240', 1883, uart_id=1, tx_pin=8, rx_pin=9, debug=True)
-  client.setup()
+The orchestrator's `docs/mqtt-contract.md` is **binding** on what these nodes publish. It is
+owned there, not here.
 
-- Subscribe and register an output handler:
+## Layout
 
-  client.subscribe('track/#')
-  def handle(topic, payload):
-      print(topic, payload)
-  client.register_topic_handler('track/', handle)
+```
+src/lib/     deployed to the board's /lib, which MicroPython puts on sys.path
+tools/       bench utilities, never deployed
+tests/       host pytest — stubs `machine` and `utime`, needs no hardware
+scripts/     run_tests.sh
+docs/        pin allocation, hardware notes, plans
+```
 
-- Publish from an input module:
+A node imports `mqtt_at`, not `lib.mqtt_at`, because `/lib` is on the path. Tests import
+device modules by exactly the name the board uses.
 
-  client.publish('track/sensor1', 'payload-data')
+`src/apps/io-node/` and `src/apps/rfid-node/` do not exist yet — see the issues below.
+`main.py` is the pre-split combined app, kept running until they land.
 
-Polling
-- Call `client.poll()` frequently from your main loop to process UART lines and
-  dispatch incoming MQTT messages to registered handlers.
+## Hardware
 
-Testing (host)
-- Tests live in `tests/`.
-- Install pytest (if not already installed):
+| Device | Bus | Notes |
+|---|---|---|
+| MCP23017 ×2 | I2C0, SDA=GP4 SCL=GP5, `0x20`/`0x21` | 16 pins each. Board 1 current sensing, board 2 IR — see `docs/pin-allocation.md` |
+| PCF8591 ADC | I2C0, `0x48` | 8-bit, 4 channels. Currently unused |
+| PN7150 NFC | I2C1, SDA=GP2 SCL=GP3, `0x28` | NCI + IRQ. The IRQ means "a message is ready", not "a tag is present" |
+| TCA9548A mux | I2C1, `0x70` | Fans I2C1 out to up to 8 readers |
+| ESP-AT modem | UART1, TX=GP8 RX=GP9, 9600 | Wired ethernet; reports `+ETH_GOT_IP` when ready |
 
-  python3 -m pip install --user pytest
+## Testing
 
-- Run tests from the project root. Important: ensure the project root is on
-  `PYTHONPATH` so the test runner can import `mqtt_at`:
+```bash
+python -m pip install --user pytest    # once
+python -m pytest                        # or: bash scripts/run_tests.sh
+```
 
-  PYTHONPATH=. pytest -q tests/test_mqtt_parser.py
+No hardware needed. `tests/conftest.py` installs stand-ins for `machine` and `utime` before
+any device module is imported, including a clock that drives timers — so debounce and
+timeout behaviour is tested by advancing time rather than by sleeping.
 
-- A convenience script is provided at `scripts/run_tests.sh`:
+Paths come from `pytest.ini`; the old `PYTHONPATH=.` prefix is no longer needed.
 
-  bash scripts/run_tests.sh
+## Deploying
 
-Notes
-- The module assumes the modem emits ASCII lines terminated by CRLF and uses the
-  `+MQTTSUBRECV` response format for incoming messages.
-- This README intentionally excludes references to any temporary USB<->UART
-  interactive test harnesses.
+The Pico lives on the bench machine, not on a dev machine. See `.claude/skills/deploy/SKILL.md`
+for the whole procedure, including which `by-id` serial device belongs to this repo — two of
+the three on that box belong to other projects.
+
+## Status
+
+Being restructured and brought onto the MQTT contract:
+
+- [#1](https://github.com/bazauto/layout-feedback/issues/1) — restructure into two nodes
+- [#2](https://github.com/bazauto/layout-feedback/issues/2) — meet the MQTT contract
+- [#3](https://github.com/bazauto/layout-feedback/issues/3) — end-to-end bring-up, one
+  current-sensing and one IR sensor
+- [#4](https://github.com/bazauto/layout-feedback/issues/4) — RFID restructure only, pending
+  hardware and `layout-orchestration#39`
+
+Plan: `docs/plans/2026-08-23-node-split.md`. Working agreement: `CLAUDE.md`.
