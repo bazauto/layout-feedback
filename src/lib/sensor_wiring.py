@@ -69,8 +69,9 @@ def is_occupied(level, active_low):
 
     One line, and it has its own name because getting it backwards publishes `clear`
     for an occupied block — which for a block_detection sensor is enough on its own to
-    let the orchestrator clear the block. Westgate Hollow's sensors are active **high**
-    (measured, see docs/pin-allocation.md), but the polarity stays configurable because
-    the next batch of hardware may not be.
+    let the orchestrator clear the block. Westgate Hollow's block detectors are active
+    **low** — occupied reads 0 (measured, see docs/pin-allocation.md). The polarity stays
+    configurable because the next batch of hardware may not be, and because fitting the
+    inverting stage in docs/block-detector-wiring.md would flip this one.
     """
     return (level == 0) if active_low else (level == 1)

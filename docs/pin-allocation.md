@@ -71,9 +71,15 @@ The sensors are switches to ground — closed (conducting) when the block is occ
 otherwise, with the internal pull-up holding the line high when open. **Occupied reads 0**, so
 `config.py` has `ACTIVE_LOW = True`.
 
+That holds because the detectors' Input A is left unpowered. Power it and the same pin idles
+at a driven 5 V instead of floating — occupied still reads 0, so `ACTIVE_LOW` is unaffected,
+but 5 V then reaches a 3.3 V expander input. **`docs/block-detector-wiring.md` is the whole
+picture**, and the place to read before changing anything about how these are wired.
+
 **A broken wire therefore reads as `clear`, not `occupied`** — the failure lands on the
 permissive state, and the 30 s re-assert cannot catch it because the node is alive and happily
-republishing. Accepted knowingly; see #9 for why, and for the closed-circuit alternatives.
+republishing. Accepted knowingly; see #9 for why, and for the closed-circuit alternatives —
+one of which `docs/block-detector-wiring.md` shows is available after all.
 
 ## Allocation is not installation
 
