@@ -75,3 +75,22 @@ Being restructured and brought onto the MQTT contract:
   (`docs/block-detector-wiring.md`)
 
 Plan: `docs/plans/2026-08-23-node-split.md`. Working agreement: `CLAUDE.md`.
+
+## Licence
+
+Released under the MIT Licence — see [`LICENSE`](LICENSE).
+
+Everything in this repository is first-party. The device drivers under `src/lib/`
+(`mcp23017_io.py`, `pcf8591_adc.py`, `pn7150.py`) were written against the manufacturers'
+datasheets rather than adapted from existing libraries, so no third-party code is vendored or
+redistributed here.
+
+The nodes run on [MicroPython](https://micropython.org/) (MIT), which is flashed to the board
+separately and is not distributed with this repository. `pytest` (MIT) is a host-side test
+dependency only.
+
+Manufacturer datasheets are deliberately **not** committed — they are copyrighted and their
+terms generally forbid redistribution. Links instead:
+[MCP23017](https://www.microchip.com/en-us/product/MCP23017),
+[PCF8591](https://www.nxp.com/products/PCF8591),
+[PN7150](https://www.nxp.com/products/PN7150).
