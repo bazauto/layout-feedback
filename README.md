@@ -38,6 +38,7 @@ device modules by exactly the name the board uses.
 | TCA9548A mux | I2C1, `0x70` | Fans I2C1 out to up to 8 readers |
 | ESP-AT modem | UART1, TX=GP8 RX=GP9, 9600 | Wired ethernet; reports `+ETH_GOT_IP` when ready |
 | Legacy Models LM-iD.1 | board 1 inputs | The current-sensing detectors. Output stage and its two modes: `docs/block-detector-wiring.md` |
+| Waveshare IR reflective | board 2 inputs | LM393, run at 3.3 V. A newer part with none of the LM-iD's ambiguity |
 
 ## Testing
 

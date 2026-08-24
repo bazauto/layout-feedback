@@ -10,6 +10,10 @@ Derived by measurement and by reading the application drawings, 2026-08-24. If y
 to re-measure this, read the polarity section first — the answer depends on a wire you may
 not realise is load-bearing.
 
+**Scope: board 1 only.** The IR sensors on board 2 are a different and much newer device with
+a different output stage — see *The IR sensors are not these* at the end. Nothing above or
+below applies to them except where it says so.
+
 ## Terminal map
 
 The board has three terminal groups. The silkscreen prints two ratings side by side against
@@ -150,6 +154,47 @@ payload asserts nothing, and neither does an open circuit.
 Current position is unchanged — `A` stays unpowered while the layout is being brought up, and
 the broken-wire limitation stands as #9 describes it. This document records that the door #9
 believed was shut is open, and what it costs to walk through it.
+
+## The IR sensors are not these
+
+Board 2 carries [Waveshare Infrared Reflective Sensor](https://www.waveshare.com/wiki/Infrared_Reflective_Sensor)
+modules — a newer part with none of the ambiguity above:
+
+| | LM-iD.1 (board 1) | Waveshare IR (board 2) |
+|---|---|---|
+| Output | Open-drain, mode depends on Input A | LM393 comparator, `DOUT` |
+| High level | 5 V, or nothing at all | **3.3 V**, from the module's own VCC |
+| Supply | Optional, and that changes the output | Required, 3.0–5.3 V — run at 3.3 V here |
+| Safe on a 3.3 V expander input? | Only with `A` unpowered | **Yes, directly** |
+
+An LM393's output is open-collector by construction, so the module carries a pull-up to VCC —
+which means, unlike an unpowered LM-iD, **its high level is asserted at the sensor** rather
+than being an absence. There is no 5 V hazard and no mode to get wrong. The module also brings
+out `AOUT` and a sensitivity potentiometer; neither is used.
+
+Both boards happen to read **active low**, so the single global `ACTIVE_LOW = True` is correct
+for both. That is a coincidence of two unrelated devices, not a property of the design —
+`main.py` passes `config.ACTIVE_LOW` for every sensor, so the first batch that disagrees makes
+it a per-sensor field.
+
+### The broken-wire exposure is still there, and it fails the other way
+
+Because `DOUT` idles high through the module's pull-up and the node holds the line up too, a
+severed wire still floats to the permissive reading. What differs is the consequence:
+
+| | Broken wire reports | Consequence |
+|---|---|---|
+| `block_detection` | `clear` | Orchestrator routes a train into occupied track |
+| `ir_position` | *not yet reached* | A berthing run never gets its stop trigger — **overrun**, not an early stop |
+
+For the intended use — position stops for load/unload alignment — that is the failure worth
+knowing about: the beam that never fires does not stop the train short, it fails to stop it at
+all.
+
+Supervising these is **cheaper than supervising the detectors**, because the high level is
+already an assertion at 3.3 V: a pull-down at the node end instead of the expander's internal
+pull-up separates *connected and not triggered* (~3 V) from *broken* (0 V), with no level
+shifter and no inverting stage. Not fitted, and not planned yet — tracked with the rest of #9.
 
 ## Sources
 
