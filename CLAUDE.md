@@ -82,6 +82,8 @@ honestly**, because the backend needs the live message to keep trusting the sens
 | PN7150 NFC | I2C1, SDA=GP2 SCL=GP3, addr `0x28` | NCI + IRQ. IRQ means "a message is ready", **not** "a tag is present". |
 | TCA9548A mux | I2C1, addr `0x70` | Fans I2C1 out to up to 8 PN7150 readers |
 | ESP-AT modem | UART1, TX=GP8 RX=GP9, 9600 baud | Wired ethernet; reports `+ETH_GOT_IP` when ready |
+| LM-iD.1 detectors | board 1 (`0x20`) inputs | Current sensing. Open-drain, **5 V if Input A is ever powered** — `docs/block-detector-wiring.md` |
+| Waveshare IR reflective | board 2 (`0x21`) inputs | LM393, VCC 3.0–5.3 V, run at 3.3 V. Open-collector + on-board pull-up, so its high is asserted at the sensor |
 
 ## Commands
 
@@ -139,17 +141,23 @@ directory on the path for the same reason.
 - **Any `mpremote` command stops the running node**, dropping it to the raw REPL until the
   next reset.
 - `AT+MQTTPUB` honours backslash escaping, so JSON needs no `AT+MQTTPUBRAW`.
-- The block detectors are **active low** — occupied reads 0. `ACTIVE_LOW = True`, and it is
-  correct however Input A is wired. An earlier "active high" note here was #8's, superseded
-  by #11; see `docs/block-detector-wiring.md` for why both sessions saw what they saw.
+- **Both boards read active low** — occupied/triggered is 0 — but they are different devices
+  and only agree by coincidence. `ACTIVE_LOW = True` is one global flag covering both
+  (`main.py` passes `config.ACTIVE_LOW` for every sensor); the day a batch disagrees, it has
+  to become per-sensor. An earlier "active high" note here was #8's, superseded by #11; see
+  `docs/block-detector-wiring.md`.
 
 ### Traps
 
-- **A broken sensor wire reads as `clear`, not `occupied`** (#9). The sensors switch to
+- **A broken sensor wire reads as `clear`, not `occupied`** (#9). Both sensor types switch to
   ground, so an open circuit floats up to the pull-up — the permissive state. The re-assert
   cannot catch it: the node is alive and republishing. Accepted knowingly — but #9 rejected
   the closed-circuit fix on a premise since shown false, so it is reopened
   (`docs/block-detector-wiring.md`).
+- **A dead IR beam fails toward overrun, not toward stopping.** Same broken wire, different
+  consequence: a `block_detection` sensor wrongly says empty track, an `ir_position` beam
+  wrongly says *not yet reached*, so a berthing run never gets its stop trigger. Cheaper to
+  supervise than the detectors — they already run at 3.3 V — but nothing is fitted (#9).
 - **The block detectors' Input A is deliberately unpowered, and that is load-bearing.**
   Powering it — which every manufacturer datasheet tells you to do — makes the output idle at
   **5 V** into 3.3 V expander inputs. Do not wire it without reading

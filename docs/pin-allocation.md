@@ -67,19 +67,30 @@ times counting got it wrong.
 
 ## Sensor polarity: active LOW
 
-The sensors are switches to ground — closed (conducting) when the block is occupied, open
-otherwise, with the internal pull-up holding the line high when open. **Occupied reads 0**, so
-`config.py` has `ACTIVE_LOW = True`.
+Both boards pull to ground when asserting — occupied on board 1, triggered on board 2 — with
+the internal pull-up holding the line high otherwise. **Occupied reads 0**, so `config.py` has
+`ACTIVE_LOW = True`.
 
-That holds because the detectors' Input A is left unpowered. Power it and the same pin idles
-at a driven 5 V instead of floating — occupied still reads 0, so `ACTIVE_LOW` is unaffected,
-but 5 V then reaches a 3.3 V expander input. **`docs/block-detector-wiring.md` is the whole
-picture**, and the place to read before changing anything about how these are wired.
+**The two boards are different devices that agree by coincidence, not by design.** `main.py`
+passes one global `config.ACTIVE_LOW` for every sensor, so the first batch that disagrees
+makes it a per-sensor field rather than a config edit.
+
+| Board | Device | Output |
+|---|---|---|
+| 1 (`0x20`) | Legacy Models LM-iD.1 | Open-drain. **Idles at 5 V if Input A is ever powered** — which is what every manufacturer datasheet tells you to do |
+| 2 (`0x21`) | Waveshare IR reflective | LM393 open-collector with an on-board pull-up to its own 3.3 V VCC. Safe on an expander input directly |
+
+**`docs/block-detector-wiring.md` is the whole picture**, and the place to read before
+changing anything about how either is wired.
 
 **A broken wire therefore reads as `clear`, not `occupied`** — the failure lands on the
 permissive state, and the 30 s re-assert cannot catch it because the node is alive and happily
 republishing. Accepted knowingly; see #9 for why, and for the closed-circuit alternatives —
 one of which `docs/block-detector-wiring.md` shows is available after all.
+
+On board 2 the same break reads as *beam not yet reached*, so a berthing run never gets its
+stop trigger. Less likely to admit a train to occupied track; more likely to overrun a
+position stop.
 
 ## Allocation is not installation
 
