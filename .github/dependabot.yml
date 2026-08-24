@@ -1,0 +1,21 @@
+version: 2
+
+updates:
+  # GitHub Actions used by .github/workflows/ci.yml. Pinned major tags go stale
+  # quietly — a deprecated runner image or action version fails CI on an unrelated
+  # PR, which is the worst time to find out.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: "ci"
+    groups:
+      actions:
+        patterns:
+          - "*"
+
+# No Python ecosystem entry: there is no requirements.txt or pyproject.toml.
+# pytest is a host-side developer tool, and the nodes run MicroPython flashed to
+# the board rather than installed packages. Add a pip entry here if a pinned
+# dependency file ever lands.
