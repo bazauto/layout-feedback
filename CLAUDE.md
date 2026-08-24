@@ -21,6 +21,7 @@ Reasoning belongs in `docs/`.
 | `../layout-orchestration/docs/mqtt-contract.md` | **Binding.** Topics, payloads, QoS, retention, the 30 s re-assert. This repo does not own it and must never amend it. |
 | `docs/pin-allocation.md` | Which sensor is on which expander pin, and why allocation is not installation |
 | `docs/block-detector-wiring.md` | The LM-iD output stage: its two modes, why Input A is unpowered, the 3.3 V hazard if it is not |
+| `docs/point-position-feedback.md` | Board 3 (`0x22`): why two inputs per point, the `0x22` allocation, and why command and feedback being different devices is the hazard. **Not built** |
 | `docs/DEVELOPMENT_NOTES.md` | Module conventions, the MCP23017 pin map, hardware wiring |
 | `docs/PN7150_STATE_MACHINE_PLAN.md` | The NCI state machine the RFID reader implements |
 | `docs/MQTT_AT_COMMANDS.md` | The ESP-AT command set the transport speaks |
@@ -84,6 +85,7 @@ honestly**, because the backend needs the live message to keep trusting the sens
 | ESP-AT modem | UART1, TX=GP8 RX=GP9, 9600 baud | Wired ethernet; reports `+ETH_GOT_IP` when ready |
 | LM-iD.1 detectors | board 1 (`0x20`) inputs | Current sensing. Open-drain, **5 V if Input A is ever powered** — `docs/block-detector-wiring.md` |
 | Waveshare IR reflective | board 2 (`0x21`) inputs | LM393, VCC 3.0–5.3 V, run at 3.3 V. Open-collector + on-board pull-up, so its high is asserted at the sensor |
+| Cobalt iP Digital points | board 3 (`0x22`), **planned** | Commanded over **DCC**, not MQTT — no feedback or query of its own. Position is read from its `S2` changeover only. `docs/point-position-feedback.md` |
 
 ## Commands
 
@@ -149,6 +151,12 @@ directory on the path for the same reason.
 
 ### Traps
 
+- **A point is commanded and read by two devices that know nothing about each other.** The
+  Cobalt takes DCC accessory commands and can report nothing; position comes only from its
+  `S2` contacts on board 3. So `points.dcc_address` (orchestrator) and `pointId` → pins (here)
+  are independent mappings that nothing cross-checks — get one wrong and the system commands
+  one motor while reading another, with both ends looking healthy
+  (`docs/point-position-feedback.md`).
 - **A broken sensor wire reads as `clear`, not `occupied`** (#9). Both sensor types switch to
   ground, so an open circuit floats up to the pull-up — the permissive state. The re-assert
   cannot catch it: the node is alive and republishing. Accepted knowingly — but #9 rejected
