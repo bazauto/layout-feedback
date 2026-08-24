@@ -20,6 +20,7 @@ Reasoning belongs in `docs/`.
 |---|---|
 | `../layout-orchestration/docs/mqtt-contract.md` | **Binding.** Topics, payloads, QoS, retention, the 30 s re-assert. This repo does not own it and must never amend it. |
 | `docs/pin-allocation.md` | Which sensor is on which expander pin, and why allocation is not installation |
+| `docs/block-detector-wiring.md` | The LM-iD output stage: its two modes, why Input A is unpowered, the 3.3 V hazard if it is not |
 | `docs/DEVELOPMENT_NOTES.md` | Module conventions, the MCP23017 pin map, hardware wiring |
 | `docs/PN7150_STATE_MACHINE_PLAN.md` | The NCI state machine the RFID reader implements |
 | `docs/MQTT_AT_COMMANDS.md` | The ESP-AT command set the transport speaks |
@@ -138,13 +139,24 @@ directory on the path for the same reason.
 - **Any `mpremote` command stops the running node**, dropping it to the raw REPL until the
   next reset.
 - `AT+MQTTPUB` honours backslash escaping, so JSON needs no `AT+MQTTPUBRAW`.
-- The sensors are **active high**.
+- The block detectors are **active low** — occupied reads 0. `ACTIVE_LOW = True`, and it is
+  correct however Input A is wired. An earlier "active high" note here was #8's, superseded
+  by #11; see `docs/block-detector-wiring.md` for why both sessions saw what they saw.
 
 ### Traps
 
 - **A broken sensor wire reads as `clear`, not `occupied`** (#9). The sensors switch to
   ground, so an open circuit floats up to the pull-up — the permissive state. The re-assert
-  cannot catch it: the node is alive and republishing. Accepted knowingly.
+  cannot catch it: the node is alive and republishing. Accepted knowingly — but #9 rejected
+  the closed-circuit fix on a premise since shown false, so it is reopened
+  (`docs/block-detector-wiring.md`).
+- **The block detectors' Input A is deliberately unpowered, and that is load-bearing.**
+  Powering it — which every manufacturer datasheet tells you to do — makes the output idle at
+  **5 V** into 3.3 V expander inputs. Do not wire it without reading
+  `docs/block-detector-wiring.md`.
+- **You cannot determine this sensor's polarity by reading an expander pin.** A floating
+  MCP23017 input and a driven-high one both read 1. Meter `B` against 0 V, off the expander.
+  Getting this wrong has cost two bench sessions and one wrong conclusion in the repo.
 - **Pin numbers here are logical and 0-based**, not header positions. Logical 8 is GPB0 on
   chip pin 1, physically opposite pins 0–7, and header labels are 1-based. Counting has got
   this wrong twice. Scan all 32 pins and see which one moves instead.

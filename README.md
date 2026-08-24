@@ -37,6 +37,7 @@ device modules by exactly the name the board uses.
 | PN7150 NFC | I2C1, SDA=GP2 SCL=GP3, `0x28` | NCI + IRQ. The IRQ means "a message is ready", not "a tag is present" |
 | TCA9548A mux | I2C1, `0x70` | Fans I2C1 out to up to 8 readers |
 | ESP-AT modem | UART1, TX=GP8 RX=GP9, 9600 | Wired ethernet; reports `+ETH_GOT_IP` when ready |
+| Legacy Models LM-iD.1 | board 1 inputs | The current-sensing detectors. Output stage and its two modes: `docs/block-detector-wiring.md` |
 
 ## Testing
 
@@ -67,5 +68,8 @@ Being restructured and brought onto the MQTT contract:
   current-sensing and one IR sensor
 - [#4](https://github.com/bazauto/layout-feedback/issues/4) — RFID restructure only, pending
   hardware and `layout-orchestration#39`
+- [#9](https://github.com/bazauto/layout-feedback/issues/9) — a broken sensor wire reads as
+  clear track. Reopened: the closed-circuit fix it rejected turns out to be available
+  (`docs/block-detector-wiring.md`)
 
 Plan: `docs/plans/2026-08-23-node-split.md`. Working agreement: `CLAUDE.md`.
