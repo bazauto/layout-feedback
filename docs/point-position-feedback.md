@@ -5,8 +5,9 @@ auxiliary switch contacts and publishes `point/{pointId}/reading`.
 
 **Nothing here is built yet.** This is the design agreed before code, so that the wiring, the
 allocation and the contract questions are settled while they are still cheap. The node work is
-tracked separately; the one genuinely blocking question is in
-`bazauto/layout-orchestration` and is named at the end.
+#15; the one genuinely blocking question is
+[`bazauto/layout-orchestration#167`](https://github.com/bazauto/layout-orchestration/issues/167)
+and is explained at the end.
 
 The orchestrator's decision record for the feature is
 `../layout-orchestration/docs/point-feedback.md` (D1–D10), and
@@ -201,7 +202,15 @@ the freshness window. A dead *point* node degrades nothing.
 That is the sensor side. There is no equivalent on the point side at all.
 
 **A periodic point re-assert is a `docs/mqtt-contract.md` amendment, and the contract changes
-before the code.** It is not this repo's to make. Raised as an issue in
-`bazauto/layout-orchestration`; this node should not be built against the current shape until
-it is settled, because "publish every N seconds" versus "answer a periodic query" are
-different firmware.
+before the code.** It is not this repo's to make — raised as
+[`bazauto/layout-orchestration#167`](https://github.com/bazauto/layout-orchestration/issues/167).
+
+This node should not be built against the current shape until #167 settles, because the two
+candidate answers are *different firmware*: "republish every N seconds" is a timer in the
+publish loop, "answer a periodic query" is subscription handling and nothing else. Wiring and
+bench work are not blocked; only the publish behaviour is.
+
+The topology sharpens the problem rather than softening it. Because the commanded device is
+not the reporting device, silence after a command carries **no signal at all** — a DCC
+accessory command is fire-and-forget and will keep succeeding long after the feedback node has
+stopped. On a self-reporting controller, silence after a command would at least be suspicious.
