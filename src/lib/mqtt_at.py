@@ -78,6 +78,34 @@ _CRLF = b'\r\n'
 
 RECONNECT_BACKOFF_MS = 5000
 
+# How long to wait for the modem to start answering at all, and how long each probe
+# gets. See `wait_for_modem()` for why asking first is not optional.
+MODEM_READY_TIMEOUT_MS = 15000
+MODEM_PROBE_INTERVAL_MS = 500
+
+
+# --- startup failures ------------------------------------------------------
+#
+# These subclass `RuntimeError`, which is what `setup()` used to raise and what any
+# existing caller already catches. The subclasses exist so a supervisor can tell *which*
+# stage failed without matching on message text — the node flashes a different LED code
+# for each, and on a headless board that code is the only diagnostic there is.
+
+class ATError(RuntimeError):
+    """Base for the transport's startup failures."""
+
+
+class ModemNotResponding(ATError):
+    """The modem is not answering AT commands at all."""
+
+
+class NetworkNotReady(ATError):
+    """The modem answers, but never reported an IP address."""
+
+
+class BrokerUnreachable(ATError):
+    """The network is up, but the broker link could not be established."""
+
 
 def _take_line(buf):
     """Take one CRLF-terminated line, or None if it has not fully arrived."""
@@ -192,6 +220,32 @@ class MQTTATClient:
         self._subscriptions = []
         self._lwt = None
 
+    def wait_for_modem(self, timeout_ms=MODEM_READY_TIMEOUT_MS,
+                       probe_interval_ms=MODEM_PROBE_INTERVAL_MS):
+        """Poll bare `AT` until the modem answers. True once it does, False on timeout.
+
+        The Pico and the modem leave a power cycle together, and the Pico wins: it is
+        issuing commands about 300 ms in (MicroPython's own boot, plus 19 ms of I2C and
+        expander setup), while the modem needs 1.2-3.5 s to reach `ready` — the spread
+        is Ethernet link negotiation. Measured on the bench, 2026-08-27.
+
+        A command sent into that window is not refused, it is swallowed whole: no echo
+        and no reply. So `AT+RST` used to time out against its 2 s default whenever the
+        link took the slow path, which killed the node outright — the intermittent
+        "doesn't come up after a power cycle". Ask the modem whether it is there before
+        giving it an order.
+        """
+        deadline = _now_ms() + int(timeout_ms)
+        while True:
+            if self.send_at_and_wait('AT', timeout_ms=probe_interval_ms):
+                # Drop whatever the modem's boot log left behind. Nothing legitimate is
+                # in flight at this point, and the bytes a booting ESP emits are at
+                # another baud rate entirely — noise, not frames.
+                self._rx_buffer = b""
+                return True
+            if _now_ms() >= deadline:
+                return False
+
     def setup(self):
         """Initialise UART, apply base config and connect to broker.
 
@@ -204,33 +258,52 @@ class MQTTATClient:
                 raise RuntimeError('machine.UART and machine.Pin not available; provide an existing uart instance when not on MicroPython')
             self.uart = UART(self.uart_id, baudrate=self.baud, tx=Pin(self.tx_pin), rx=Pin(self.rx_pin))
 
+        # The modem has to be asked whether it is awake before it is given an order.
+        if not self.wait_for_modem():
+            self._dump('modem ready')
+            raise ModemNotResponding(
+                'modem did not answer AT within %d ms' % MODEM_READY_TIMEOUT_MS)
+
         # reset the network module in case this isn't a fresh power-on
-        ok = self.send_at_and_wait('AT+RST')
+        ok = self.send_at_and_wait('AT+RST', timeout_ms=5000)
         if not ok:
             self._log('Warning: AT+RST returned ERROR or timed out')
-            raise RuntimeError('AT+RST failed')
+            self._dump('reset')
+            raise ModemNotResponding('AT+RST failed')
 
         # wait for network ready indication from modem: '+ETH_GOT_IP:...' line
         # the module typically prints 'ready' then '+ETH_GOT_IP:<ip>' when ready.
-        got_ip = self.wait_for_line('+ETH_GOT_IP:', timeout_ms=30000)
+        #
+        # Check what has already arrived before waiting. On a fast link the IP can land
+        # in the same read as the reset's own OK, and `wait_for_line` only inspects
+        # lines recorded after it is called — so it would sit out its whole 30 s waiting
+        # for a line that has been and gone, and then raise as though the network were
+        # down.
+        got_ip = None
+        for line in self.lines_since_command():
+            if line.startswith('+ETH_GOT_IP:'):
+                got_ip = line
+                break
+        if got_ip is None:
+            got_ip = self.wait_for_line('+ETH_GOT_IP:', timeout_ms=30000)
         if not got_ip:
             self._dump('post-reset')
-            raise RuntimeError('Network device did not report IP after reset')
+            raise NetworkNotReady('Network device did not report IP after reset')
 
         config_cmd = 'AT+MQTTUSERCFG=0,1,"%s","","",0,0,""' % self.client_id
         if not self.send_at_and_wait(config_cmd, timeout_ms=50000):
             self._dump('base config')
-            raise RuntimeError('set_base_config returned ERROR or timed out')
+            raise BrokerUnreachable('set_base_config returned ERROR or timed out')
 
         # The will, if one was registered, has to be in place before the connect —
         # the broker only reads it at connection time.
         if not self._apply_lwt():
             self._dump('lwt config')
-            raise RuntimeError('AT+MQTTCONNCFG returned ERROR or timed out')
+            raise BrokerUnreachable('AT+MQTTCONNCFG returned ERROR or timed out')
 
         if not self._connect():
             self._dump('connect')
-            raise RuntimeError('connect returned ERROR or timed out')
+            raise BrokerUnreachable('connect returned ERROR or timed out')
 
         # `_connect()` returning True only means the modem accepted the command. The
         # broker link is confirmed by the modem's own +MQTTCONNECTED notification,
@@ -238,7 +311,7 @@ class MQTTATClient:
         if not self.connected:
             if self.wait_for_line('+MQTTCONNECTED', timeout_ms=5000) is None:
                 self._dump('connect')
-                raise RuntimeError('modem accepted AT+MQTTCONN but never reported +MQTTCONNECTED')
+                raise BrokerUnreachable('modem accepted AT+MQTTCONN but never reported +MQTTCONNECTED')
         self._next_reconnect_ms = None
 
     def _write_line(self, line: str):
@@ -660,4 +733,5 @@ try:
 except Exception:
     parse_mqttsubrecv_line = None
 
-__all__ = ['MQTTATClient']
+__all__ = ['MQTTATClient', 'ATError', 'ModemNotResponding', 'NetworkNotReady',
+           'BrokerUnreachable']
