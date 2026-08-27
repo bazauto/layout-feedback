@@ -22,6 +22,7 @@ Reasoning belongs in `docs/`.
 | `docs/pin-allocation.md` | Which sensor is on which expander pin, and why allocation is not installation |
 | `docs/block-detector-wiring.md` | The LM-iD output stage: its two modes, why Input A is unpowered, the 3.3 V hazard if it is not |
 | `docs/point-position-feedback.md` | Board 3 (`0x22`): why two inputs per point, the `0x22` allocation, and why command and feedback being different devices is the hazard. **Not built** |
+| `docs/startup-and-status-led.md` | The power-on race with the modem, the retry-then-reset policy, and **what the LED flash codes mean** |
 | `docs/DEVELOPMENT_NOTES.md` | Module conventions, the MCP23017 pin map, hardware wiring |
 | `docs/PN7150_STATE_MACHINE_PLAN.md` | The NCI state machine the RFID reader implements |
 | `docs/MQTT_AT_COMMANDS.md` | The ESP-AT command set the transport speaks |
@@ -113,8 +114,11 @@ publish contract readings that the orchestrator trusts, and the block follows th
 ```
 src/lib/     -> device /lib
   mqtt_at.py            ESP-AT transport. Length-aware frames, reconnect, failures returned.
+                        Waits for the modem to answer before commanding it.
   layout_mqtt.py        The contract: topics, payloads, QoS, retention, the 25 s re-assert.
   sensor_wiring.py      Allocation vs installed, and the occupancy polarity. No `machine`.
+  node_startup.py       Retry-then-reset startup policy, and the LED code table. No `machine`.
+  status_led.py         The onboard LED as a countable flash code. No `machine`.
   mcp23017_io.py        I2C expander, in and out. Poll-only.
   input_pin_monitor.py  Native Pico GPIO, IRQ + timer debounce. Currently unused.
   pcf8591_adc.py        I2C ADC. Wired to nothing; no contract topic for analog yet.
@@ -151,6 +155,11 @@ directory on the path for the same reason.
 
 ### Traps
 
+- **A node that cannot start flashes a code and reboots — it no longer dies quietly.**
+  Solid LED is running, `N` flashes is a failure at stage `N`, dark is no power or a hard
+  crash. Codes and the retry policy are in `docs/startup-and-status-led.md`. Until 2026-08-27
+  a modem still booting when the Pico reached `AT+RST` killed the node outright, with the LED
+  never lighting — the intermittent "doesn't come up after a power cycle".
 - **A point is commanded and read by two devices that know nothing about each other.** The
   Cobalt takes DCC accessory commands and can report nothing; position comes only from its
   `S2` contacts on board 3. So `points.dcc_address` (orchestrator) and `pointId` → pins (here)
