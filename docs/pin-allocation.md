@@ -47,6 +47,44 @@ three-line config change. It costs the alignment.
 | 8 | GPB0 | 1 | Goods Shed | `ir---goods-shed` |
 | 9–15 | GPB1–7 | 2–8 | *spare* | |
 
+## Board 3 — MCP23017 `0x22` — point position feedback
+
+**Two pins per point, not one.** A single input would infer `reverse` from the absence of
+`normal`, and an absence is equally a broken wire, a lost supply, or a point sitting
+mid-throw. The design and the hazards are in `docs/point-position-feedback.md`.
+
+The pair for a point always stays on this one chip, so a chip that drops off the bus fails
+both halves together and the point reads `unknown` — the correct answer. Split across two
+chips, a half failure leaves exactly one closed reading: a confident, corroborated-looking
+position that nothing is corroborating.
+
+| Pin | Port | Chip pin | Point | Throw | `pointId` |
+|---|---|---|---|---|---|
+| 0 | GPA0 | 21 | P1 Fiddle Yard | normal | `88d5527d-c7db-40ab-b27b-532503487c32` |
+| 1 | GPA1 | 22 | P1 Fiddle Yard | reverse | " |
+| 2 | GPA2 | 23 | P2 Layout Entry | normal | `acc2150b-ffa1-4733-b2ff-1e4d2147dfe8` |
+| 3 | GPA3 | 24 | P2 Layout Entry | reverse | " |
+| 4 | GPA4 | 25 | P3 Siding 1 | normal | `8ccb1cf8-b9ce-448e-bb97-c56a886f46c3` |
+| 5 | GPA5 | 26 | P3 Siding 1 | reverse | " |
+| 6 | GPA6 | 27 | P4 Siding 2 | normal | `0e615557-a952-41ed-a5f2-c43d9eefa78f` |
+| 7 | GPA7 | 28 | P4 Siding 2 | reverse | " |
+| 8 | GPB0 | 1 | P5 Goods Shed | normal | `720bde49-5e2e-47f9-b691-1391e0195240` |
+| 9 | GPB1 | 2 | P5 Goods Shed | reverse | " |
+| 10 | GPB2 | 3 | P6 Engine Shed | normal | `210cf5c3-150a-4ef5-99b0-4a494eb48a4f` |
+| 11 | GPB3 | 4 | P6 Engine Shed | reverse | " |
+| 12–15 | GPB4–7 | 5–8 | *spare* | | |
+
+Wiring is `S2-C` to 0 V and each throw to its own pin, so a closed contact reads 0 against
+the expander's internal pull-up — the same polarity as the sensor boards, by coincidence
+rather than by rule, which is why it has its own `POINTS_ACTIVE_LOW` flag.
+
+**Which throw is `normal` cannot be determined from the wiring.** Nothing reveals which way
+round a point is fitted, or which `S2` terminal the orchestrator calls `normal`. It has to be
+established per point by throwing it and looking. The `normal`/`reverse` columns above are the
+allocation's *intent*; commissioning confirms or corrects them.
+
+`S1` is not available — it is spoken for by frog polarity.
+
 ## Pin numbering is the thing that goes wrong
 
 The numbers in these tables are **logical pins, 0-based**: 0–7 are GPA0–7, 8–15 are GPB0–7.
@@ -113,6 +151,12 @@ Two, both on the **Goods Shed** block:
 |---|---|---|---|---|
 | 1 (`0x20`) | 8 | GPB0 | 1 | `cs---goods-shed` |
 | 2 (`0x21`) | 8 | GPB0 | 1 | `ir---goods-shed` |
+
+**No points.** Board 3 is fitted and answers on the bus, but no `S2` contacts are landed, so
+`POINTS_INSTALLED` is empty and nothing is published on any `point/*/reading`. Bring points up
+**one at a time**: every point fault kind Safe-Stops the whole layout, including a fault on a
+point no route holds, so flipping all six to `positionFeedback: "required"` at once produces a
+layout that halts on the first flaky contact with five other unproven points to rule out.
 
 Two things follow from this being the pair brought up first, both of which paid off:
 

@@ -3,11 +3,10 @@
 Design note for the third MCP23017 (`0x22`), which reads the Cobalt iP Digital point motors'
 auxiliary switch contacts and publishes `point/{pointId}/reading`.
 
-**Nothing here is built yet.** This is the design agreed before code, so that the wiring, the
-allocation and the contract questions are settled while they are still cheap. The node work is
-#15; the one genuinely blocking question is
-[`bazauto/layout-orchestration#167`](https://github.com/bazauto/layout-orchestration/issues/167)
-and is explained at the end.
+**Status (2026-08-27): the firmware is built; the wiring is not landed.** The expander is
+fitted and answers on the bus, `POINTS_INSTALLED` in `config.py` is empty, and nothing is
+published until an `S2` pair is wired and its point added. The blocking question below settled
+before the code was written — see *The blocking question, which was not ours*.
 
 The orchestrator's decision record for the feature is
 `../layout-orchestration/docs/point-feedback.md` (D1–D10), and
@@ -179,38 +178,56 @@ first flaky contact with five other unproven points to rule out. Flip one, run i
 while. The escape hatch is per point and immediate: setting a point back to `'none'` clears
 its latched fault.
 
-## The blocking question, which is not ours
+## The blocking question, which was not ours — settled
 
-**Nothing checks that a point controller is still alive.** The pieces compound:
+**Nothing checked that a point controller was still alive.** `point/*/reading` was not
+retained and had no periodic re-assert, the confirmation deadline arms on a `command` and
+never on a `query`, and the backend queried only on startup, on reconnect and on operator
+request. So a node that died quietly left the last `confirmedPosition` standing indefinitely
+while the layout kept setting roads over points nothing had observed since.
 
-- `point/*/reading` is not retained and has **no periodic re-assert**, unlike `sensor/*/reading`
-  with its 30 s rule. It is published on change and on query only.
-- The confirmation deadline arms on a **`command`**; a **`query` deliberately does not** arm it.
-- The backend queries on startup, on broker reconnect and on operator request — **not
-  periodically**.
+The topology sharpened that rather than softening it: because the commanded device is not the
+reporting device, silence after a command carried **no signal at all** — a DCC accessory
+command is fire-and-forget and keeps succeeding long after the feedback node has stopped.
 
-So once points are `'required'`, a node that dies quietly leaves the last `confirmedPosition`
-standing indefinitely, and the layout keeps setting roads over points whose position nothing
-has observed since it stopped. A dead *sensor* node degrades its blocks to `unknown` inside
-the freshness window. A dead *point* node degrades nothing.
+This was a `docs/mqtt-contract.md` amendment and not this repo's to make. Raised as
+[`bazauto/layout-orchestration#167`](https://github.com/bazauto/layout-orchestration/issues/167),
+**closed 2026-08-24**. It settled as the first of the two candidate answers — republish on a
+timer, which is the same shape this repo already runs for sensors, rather than a periodic
+query. The contract now reads:
 
-#25 left this open deliberately rather than by omission:
+> Published by the point controller whenever its observed position changes, in response to a
+> `point/{pointId}/query`, **and** re-published unchanged at least every **30 seconds** as a
+> liveness assertion. NOT retained.
 
-> Whether `sensor/*/reading` additionally needs its own liveness/staleness check remains #28's
-> call, not this document's.
+with `POINT_FRESHNESS_TIMEOUT_MS` at 90 s — three missed re-asserts. A `required` point that
+goes quiet degrades to `confirmation: "stale"` with `confirmedPosition: "unknown"` and its
+edges become untraversable. That is a **degradation, not a fault**: it latches no `PointFault`
+and does not Safe-Stop. A point left at `positionFeedback: "none"` has nothing reporting on it
+and never goes stale.
 
-That is the sensor side. There is no equivalent on the point side at all.
+So this node re-asserts every point on the same 25 s timer as its sensors, through the same
+`LayoutMQTT.tick()`. One rule, one loop — the re-assert is the single easiest thing here to
+forget and the most expensive to get wrong, and it should not be possible to implement it for
+one topic and miss it for the other.
 
-**A periodic point re-assert is a `docs/mqtt-contract.md` amendment, and the contract changes
-before the code.** It is not this repo's to make — raised as
-[`bazauto/layout-orchestration#167`](https://github.com/bazauto/layout-orchestration/issues/167).
+## Where this lives in the code
 
-This node should not be built against the current shape until #167 settles, because the two
-candidate answers are *different firmware*: "republish every N seconds" is a timer in the
-publish loop, "answer a periodic query" is subscription handling and nothing else. Wiring and
-bench work are not blocked; only the publish behaviour is.
+| Piece | File |
+|---|---|
+| Contact pair → position, and the allocation checks | `src/lib/point_wiring.py` |
+| Topics, payload, QoS/retention, the re-assert, query bookkeeping | `src/lib/layout_mqtt.py` |
+| The `0x22` allocation and the installed allow-list | `src/apps/io-node/config.py` |
+| Pin setup, query subscription, the read loop | `src/apps/io-node/main.py` |
 
-The topology sharpens the problem rather than softening it. Because the commanded device is
-not the reporting device, silence after a command carries **no signal at all** — a DCC
-accessory command is fire-and-forget and will keep succeeding long after the feedback node has
-stopped. On a self-reporting controller, silence after a command would at least be suspicious.
+Two things worth knowing about the implementation:
+
+- **A query is noted, never answered from the callback.** `poll()` dispatches the handler, so
+  publishing from inside it would re-enter the modem in the middle of whatever command
+  `poll()` was called from. `note_query()` sets a flag and `tick()` answers on the next pass,
+  a few tens of milliseconds later. Safe to be late, because a query does not arm the
+  confirmation deadline.
+- **A failed subscribe refuses to start.** Unlike a failed publish, it is not survivable: the
+  node would come up healthy, re-assert happily, and never answer a query — leaving every
+  queried point at `unknown` with nothing reporting a fault. It raises, the supervisor retries,
+  and the LED flashes code 5.
