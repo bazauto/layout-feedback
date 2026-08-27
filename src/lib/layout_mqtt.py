@@ -41,6 +41,24 @@ STATE_CLEAR = "clear"
 SENSOR_QOS = 1
 SENSOR_RETAIN = 1
 
+# Point position vocabulary. Unlike a command, a reading MAY be `unknown`.
+POSITION_NORMAL = "normal"
+POSITION_REVERSE = "reverse"
+POSITION_UNKNOWN = "unknown"
+
+# This node reads changeover contacts, so everything it reports is independently sensed.
+# It commands nothing and must never claim `driver`, which is a delivery acknowledgement
+# rather than a position confirmation and never confirms a point requiring feedback.
+SOURCE_SENSOR = "sensor"
+
+# `point/*/reading` is QoS 1 and explicitly **NOT** retained. A sensor's occupancy
+# self-corrects on the next movement; a point's position can change while its controller
+# is offline — hand-thrown during a shutdown, power lost mid-travel, a linkage dropped —
+# and nothing on the layout corrects it afterwards. A retained point reading is a
+# confident assertion with no correction path. Restart recovery is `point/*/query`.
+POINT_QOS = 1
+POINT_RETAIN = 0
+
 # Comfortably inside the contract's 30 s, which is itself comfortably inside the
 # backend's 90 s freshness window. Two whole re-asserts can be lost before a sensor
 # stops being trusted.
@@ -77,6 +95,13 @@ class LayoutMQTT:
         # very start of the clock leaves the timestamp at its initial value, which reads
         # as "just published", and the reading is then held for a full interval.
         self._sensors = {}
+        # point_id -> [last_position_or_None, last_published_ms, pending, query_pending]
+        #
+        # `query_pending` is set by `note_query()` from a message callback and answered
+        # by `tick()`. Publishing from inside the callback would re-enter the modem:
+        # `poll()` dispatches the handler, and a publish from there calls `poll()` again
+        # underneath it.
+        self._points = {}
 
     # -- topics ----------------------------------------------------------
 
@@ -86,6 +111,12 @@ class LayoutMQTT:
 
     def sensor_topic(self, sensor_id):
         return "%s/sensor/%s/reading" % (self.topic_base, sensor_id)
+
+    def point_topic(self, point_id):
+        return "%s/point/%s/reading" % (self.topic_base, point_id)
+
+    def point_query_topic(self, point_id):
+        return "%s/point/%s/query" % (self.topic_base, point_id)
 
     # -- registration ----------------------------------------------------
 
@@ -150,13 +181,108 @@ class LayoutMQTT:
             entry[2] = True
         return ok
 
-    def tick(self, now_ms):
-        """Re-assert anything that has gone quiet, and retry anything that failed.
+    # -- points ----------------------------------------------------------
 
-        Call every loop. Returns the number of sensors published, which is useful for a
+    def register_point(self, point_id):
+        """Declare a point this node will report the position of.
+
+        As with sensors, registration is not publication. A registered point that has
+        never been read is not re-asserted, because an unread pair would assert
+        `unknown` for a point nothing is watching.
+        """
+        validate_sensor_id(point_id, what="point id")
+        if point_id not in self._points:
+            self._points[point_id] = [None, 0, False, False]
+        return point_id
+
+    @property
+    def point_ids(self):
+        return sorted(self._points)
+
+    def last_position(self, point_id):
+        entry = self._points.get(point_id)
+        return None if entry is None else entry[0]
+
+    def point_reading_payload(self, point_id, position):
+        """The contract's point reading.
+
+        The backend's schema is `.strict()` — an unexpected field is a malformed
+        payload, which is a Fail-Safe Trigger — so this carries exactly `pointId`,
+        `position` and `source` and nothing else. `updatedAt` is optional there and is
+        omitted for the same reason it is omitted from a sensor reading: the board has
+        no RTC and no NTP, and a boot-relative value would look authoritative and be
+        wrong.
+
+        `pointId` must equal the topic segment. A mismatch is a Fail-Safe Trigger, which
+        is why both come from the same argument rather than from two lookups.
+        """
+        return json.dumps({
+            "pointId": point_id,
+            "position": position,
+            "source": SOURCE_SENSOR,
+        })
+
+    def publish_point(self, point_id, position, now_ms):
+        """Publish a position now, and reset that point's re-assert timer.
+
+        Returns whether the modem accepted it. As with `publish_sensor()`, a False
+        deliberately does not update the last-published time, so `tick()` retries on the
+        next pass rather than holding a lost reading for a full interval.
+        """
+        if point_id not in self._points:
+            raise ValueError("point %r was never registered" % point_id)
+        if position not in (POSITION_NORMAL, POSITION_REVERSE, POSITION_UNKNOWN):
+            raise ValueError(
+                "position %r is not in the contract's vocabulary" % (position,))
+
+        ok = self._publish_point(point_id, position, now_ms)
+        entry = self._points[point_id]
+        entry[0] = position
+        entry[3] = False  # any publish answers an outstanding query
+        if ok:
+            entry[1] = now_ms
+            entry[2] = False
+        else:
+            entry[2] = True
+        return ok
+
+    def note_query(self, point_id):
+        """Record that the backend asked for this point's position.
+
+        Called from a `point/{pointId}/query` message handler, which must not publish:
+        `poll()` dispatches the handler, so publishing from there would re-enter the
+        modem mid-command. `tick()` answers on the next pass instead — a few tens of
+        milliseconds later, and safe to be late, because a `query` deliberately does not
+        arm the backend's confirmation deadline the way a `command` does.
+
+        A query for a point this node does not report is ignored rather than answered:
+        replying about a point we cannot see is exactly the fabricated reading the
+        installed allow-list exists to prevent.
+        """
+        entry = self._points.get(point_id)
+        if entry is None:
+            return False
+        if entry[0] is None:
+            return False  # never read; nothing honest to say yet
+        entry[3] = True
+        return True
+
+    # -- the re-assert ---------------------------------------------------
+
+    def tick(self, now_ms):
+        """Re-assert anything that has gone quiet, answer queries, retry failures.
+
+        Call every loop. Returns the number of messages published, which is useful for a
         heartbeat log and for the bring-up check that counts re-asserts.
+
+        Both `sensor/*/reading` and `point/*/reading` carry the same 30 s obligation.
+        They reach it for different reasons — a sensor's retained copy is a bootstrap for
+        a value about to be reconfirmed, while a point is never retained and the
+        re-assert is the *only* thing that says its controller is alive — but the rule
+        here is one rule, so it is one loop.
         """
         published = 0
+
         for sensor_id in sorted(self._sensors):
             state, last_ms, pending = self._sensors[sensor_id]
             if state is None:
@@ -169,6 +295,22 @@ class LayoutMQTT:
                 published += 1
             else:
                 self._sensors[sensor_id][2] = True
+
+        for point_id in sorted(self._points):
+            position, last_ms, pending, queried = self._points[point_id]
+            if position is None:
+                continue  # never read; nothing to assert
+            if (not pending and not queried
+                    and _elapsed(now_ms, last_ms) < self._reassert_interval_ms):
+                continue
+            if self._publish_point(point_id, position, now_ms):
+                self._points[point_id][1] = now_ms
+                self._points[point_id][2] = False
+                self._points[point_id][3] = False
+                published += 1
+            else:
+                self._points[point_id][2] = True
+
         return published
 
     def _publish(self, sensor_id, occupied, now_ms):
@@ -182,6 +324,19 @@ class LayoutMQTT:
         else:
             if not ok:
                 self._report_failure(sensor_id, None)
+        return bool(ok)
+
+    def _publish_point(self, point_id, position, now_ms):
+        topic = self.point_topic(point_id)
+        payload = self.point_reading_payload(point_id, position)
+        try:
+            ok = self._client.publish(topic, payload, qos=POINT_QOS, retain=POINT_RETAIN)
+        except Exception as exc:
+            ok = False
+            self._report_failure(point_id, exc)
+        else:
+            if not ok:
+                self._report_failure(point_id, None)
         return bool(ok)
 
     def _report_failure(self, sensor_id, exc):
