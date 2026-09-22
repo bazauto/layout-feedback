@@ -74,16 +74,20 @@ position that nothing is corroborating.
 | 11 | GPB3 | 4 | P6 Engine Shed | reverse | " |
 | 12–15 | GPB4–7 | 5–8 | *spare* | | |
 
-Wiring is `S2-C` to 0 V and each throw to its own pin, so a closed contact reads 0 against
-the expander's internal pull-up — the same polarity as the sensor boards, by coincidence
-rather than by rule, which is why it has its own `POINTS_ACTIVE_LOW` flag.
+Each input is pulled to 0 V when its side is made, so it reads 0 against the expander's
+internal pull-up. That is the same polarity as the sensor boards, by coincidence rather than
+by rule, which is why it has its own `POINTS_ACTIVE_LOW` flag.
 
-**Which throw is `normal` cannot be determined from the wiring.** Nothing reveals which way
-round a point is fitted, or which `S2` terminal the orchestrator calls `normal`. It has to be
+**What drives these pins is undecided.** Neither Cobalt changeover is free: `S1` is tied to
+the accessory bus and `S2` powers the frogs. **Never wire `S2` here**, because its common is
+the frog. The candidates (tie-bar sensors, optos across the frog, an add-on changeover) all
+present as closures to 0 V, so this allocation holds whichever is chosen. See
+`point-position-feedback.md`, *The Cobalt has no free contact*.
+
+**Which input is `normal` cannot be determined from the wiring.** Nothing reveals which way
+round a point is fitted, or which input the orchestrator calls `normal`. It has to be
 established per point by throwing it and looking. The `normal`/`reverse` columns above are the
 allocation's *intent*; commissioning confirms or corrects them.
-
-`S1` is not available — it is spoken for by frog polarity.
 
 ## Pin numbering is the thing that goes wrong
 
@@ -152,8 +156,8 @@ Two, both on the **Goods Shed** block:
 | 1 (`0x20`) | 8 | GPB0 | 1 | `cs---goods-shed` |
 | 2 (`0x21`) | 8 | GPB0 | 1 | `ir---goods-shed` |
 
-**No points.** Board 3 is fitted and answers on the bus, but no `S2` contacts are landed, so
-`POINTS_INSTALLED` is empty and nothing is published on any `point/*/reading`. Bring points up
+**No points.** Board 3 is fitted and answers on the bus, but no feedback source has been
+chosen or wired, so `POINTS_INSTALLED` is empty and nothing is published on any `point/*/reading`. Bring points up
 **one at a time**: every point fault kind Safe-Stops the whole layout, including a fault on a
 point no route holds, so flipping all six to `positionFeedback: "required"` at once produces a
 layout that halts on the first flaky contact with five other unproven points to rule out.
