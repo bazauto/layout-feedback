@@ -1,4 +1,4 @@
-"""Resolve a node's point allocation table, and decode a pair of S2 contacts.
+"""Resolve a node's point allocation table, and decode a pair of feedback inputs.
 
 Pure — no `machine` import — so every check below runs in the host suite. They all fail
 at startup rather than at runtime, because a point mis-wired or mis-allocated produces a
@@ -9,7 +9,7 @@ shape this module:
 
 - **A point is commanded and read by two devices that know nothing about each other.**
   The Cobalt iP takes DCC accessory commands and can report nothing; position comes only
-  from its `S2` changeover wired into an MCP23017 here. So `points.dcc_address` in the
+  from a separate feedback pair wired into an MCP23017 here. So `points.dcc_address` in the
   orchestrator and `point_id` -> pins here are independent mappings that nothing
   cross-checks.
 - **Two inputs per point, not one.** A single input infers `reverse` from the absence of
@@ -113,10 +113,10 @@ def assert_no_pin_overlap(sensor_entries, point_entries):
 
 
 def is_closed(level, active_low):
-    """Whether one throw of an `S2` changeover is closed.
+    """Whether one feedback input of a point is made.
 
-    `S2-C` is wired to 0 V and each throw to its own expander input, so a closed contact
-    pulls its input down and reads 0 against the internal pull-up. Its own flag rather
+    Each input is pulled to 0 V when its side is made, whether by a contact, an opto or a
+    Hall switch, so a made input reads 0 against the internal pull-up. Its own flag rather
     than the sensors' `ACTIVE_LOW`: this is a third device that happens to agree with the
     other two, and the repo has already been bitten once by treating a coincidence as a
     rule.

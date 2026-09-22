@@ -53,7 +53,7 @@ def test_a_position_is_never_inferred_from_a_single_absence():
 
 
 def test_a_closed_contact_reads_low():
-    """S2-C is wired to 0 V, so a closed throw pulls its input down."""
+    """A made input is pulled to 0 V, so it reads 0 against the pull-up."""
     assert is_closed(0, active_low=True) is True
     assert is_closed(1, active_low=True) is False
     assert is_closed(1, active_low=False) is True

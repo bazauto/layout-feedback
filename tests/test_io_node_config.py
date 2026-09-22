@@ -82,7 +82,7 @@ def test_the_real_point_config_resolves():
 
 
 def test_no_points_are_installed_yet():
-    """The expander is fitted and answers on the bus, but no S2 contacts are landed.
+    """The expander is fitted and answers on the bus, but no feedback source is wired.
 
     An unwired pair reads both-open and would publish a confident `unknown` for a point
     nothing is watching — the same *allocation is not installation* rule as the sensors.
@@ -132,7 +132,7 @@ def test_no_sensor_and_point_share_a_pin():
 
 
 def test_point_contacts_are_active_low():
-    """S2-C wired to 0 V against the expander pull-up, so a closed throw reads 0.
+    """A made input is pulled to 0 V against the expander pull-up, so it reads 0.
 
     Its own flag, not `ACTIVE_LOW`: a third device agreeing with the other two is a
     coincidence, and this repo has been bitten once by treating that as a rule.

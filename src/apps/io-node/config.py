@@ -94,14 +94,16 @@ OUTPUTS = ()
 # --- board 3 (0x22): point position feedback ------------------------------
 #
 # The Cobalt iP Digital motors are commanded over **DCC** and have no feedback path of
-# their own — they cannot be asked anything. Position is read only from each motor's
-# free `S2` changeover, wired `S2-C` to 0 V with each throw to its own input here.
+# their own — they cannot be asked anything. Position is read only from a pair of
+# feedback inputs per point here. Neither Cobalt changeover is free (`S2` powers the
+# frog; never wire it here), so the source of that pair is still undecided.
 #
 # Two inputs per point, never one. A single input would infer `reverse` from the absence
 # of `normal`, and an absence is equally a broken wire, a lost supply, or a point sitting
 # mid-throw. See docs/point-position-feedback.md.
 #
-# `S2-C` to 0 V against the expander's pull-up means a closed throw reads 0. Its own flag
+# Each input is pulled to 0 V against the expander's pull-up when its side is made, so
+# a made input reads 0. Its own flag
 # rather than `ACTIVE_LOW` above: this is a third device that happens to agree with the
 # other two, and treating that coincidence as a rule is a mistake this repo has already
 # made once.
@@ -126,7 +128,7 @@ POINT_DEBOUNCE_MS = 200
 # here, and nothing cross-checks them.
 #
 # **Which throw is `normal` is unverifiable authored data.** Nothing in the wiring reveals
-# which way round a point is fitted or which `S2` terminal the orchestrator calls
+# which way round a point is fitted or which feedback input the orchestrator calls
 # `normal`. It must be established per point by throwing it and looking — assume nothing
 # from the terminal labels.
 POINTS = (
@@ -146,7 +148,7 @@ POINTS = (
 )
 
 # Physically wired, and therefore the only points published. **Empty: the expander is
-# fitted and answers on the bus, but no `S2` contacts are landed yet.**
+# fitted and answers on the bus, but no feedback source is chosen or wired yet.**
 #
 # Bring one up at a time. Every point fault kind Safe-Stops the whole layout, including a
 # fault on a point no route holds, so flipping all six to `positionFeedback: 'required'`

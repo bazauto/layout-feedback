@@ -1,12 +1,14 @@
 # Point position feedback — board 3
 
-Design note for the third MCP23017 (`0x22`), which reads the Cobalt iP Digital point motors'
-auxiliary switch contacts and publishes `point/{pointId}/reading`.
+Design note for the third MCP23017 (`0x22`), which reads two feedback inputs per point motor
+and publishes `point/{pointId}/reading`.
 
-**Status (2026-08-27): the firmware is built; the wiring is not landed.** The expander is
-fitted and answers on the bus, `POINTS_INSTALLED` in `config.py` is empty, and nothing is
-published until an `S2` pair is wired and its point added. The blocking question below settled
-before the code was written — see *The blocking question, which was not ours*.
+**Status (2026-09-22): the firmware is built; the feedback source is undecided.** The expander
+is fitted and answers on the bus, `POINTS_INSTALLED` in `config.py` is empty, and nothing is
+published. The design as built assumed the Cobalt's `S2` changeover was free to read. **It is
+not: `S2` powers the frogs**, so there is currently nothing to wire. See *The Cobalt has no
+free contact*. The blocking question below settled before the code was written — see *The
+blocking question, which was not ours*.
 
 The orchestrator's decision record for the feature is
 `../layout-orchestration/docs/point-feedback.md` (D1–D10), and
@@ -19,9 +21,9 @@ This is the fact to hold on to, because almost every hazard below follows from i
 ```
    command                                    feedback
    ───────                                    ────────
-   orchestrator                               Cobalt iP  S2 contacts
+   orchestrator                               feedback pair (undecided)
         │                                          │
-        │ setPoint(dccAddress, position)           │  dry changeover
+        │ setPoint(dccAddress, position)           │  two closures to 0 V
         ▼                                          ▼
    PicoDCC  ──<a ADDR SUBADDR ACTIVATE>──►    MCP23017 0x22
         │                                          │
@@ -32,7 +34,8 @@ This is the fact to hold on to, because almost every hazard below follows from i
 
 The Cobalt iP is commanded over **DCC accessory addresses** and has **no feedback or query
 mechanism of its own**. It cannot be asked anything. The only way its position is ever known
-is the `S2` changeover contacts wired into this node.
+is a pair of feedback inputs wired into this node, and the motor itself has none left to give
+(*The Cobalt has no free contact*).
 
 So the contract's single logical "point controller" is physically **two unrelated devices on
 two different transports, which do not know about each other.** The thing that receives the
@@ -62,22 +65,84 @@ the exact failure `point-feedback.md` D3 warns about:
 > author who reports `"sensor"` out of optimism — or who never wired the feedback switch at
 > all — silently defeat the whole feature.
 
-`S1` on the Cobalt is spoken for by frog polarity. `S2` is a free SPDT changeover — common
-plus two throws, break-before-make. Wire `S2-C` to 0 V and each throw to its own input:
+Whatever the source, each point presents two inputs, each pulled to 0 V when its side is
+made: a contact closing, an opto conducting, a Hall switch operating.
 
-| `S2-L` | `S2-R` | Reading | Meaning |
+| Normal input | Reverse input | Reading | Meaning |
 |---|---|---|---|
 | closed | open | `normal` | corroborated |
 | open | closed | `reverse` | corroborated |
 | **open** | **open** | **`unknown`** | mid-travel, broken wire, or lost supply |
-| closed | closed | `unknown` + fault | impossible on an SPDT — cross-wiring |
+| closed | closed | `unknown` + fault | impossible if both sense one mechanism — cross-wiring |
 
 The fourth row is the whole argument for two inputs. It is a wiring error that announces
 itself at commissioning instead of six months later, and it costs one expander pin.
 
-**Two inputs is the ceiling, not a compromise.** The Cobalt exposes one free changeover, so
-more pins per point cannot extract more truth from the motor. There is no version of this
-design that benefits from a third input.
+## The Cobalt has no free contact
+
+**Found 2026-09-22, after the firmware was built.** The Cobalt iP Digital has two
+break-before-make changeovers, and neither is available to this node:
+
+- **`S1` is tied to the motor's own power input.** DCC Concepts describe it as "directly
+  linked to the power input wires", intended to feed the frog. On this layout the motors run
+  from a **separate accessory DCC bus**, deliberately: a loco running into a wrongly set
+  point shorts the track bus, and the fix for that short is to throw the point, so the motor
+  must stay powered through it. `S1` would therefore feed the frog from the wrong bus. It is
+  also DCC-referenced, so it could never be a 3.3 V feedback contact either.
+- **`S2`, the independent changeover, powers the frogs** from the track bus. It is the only
+  way to do that correctly here, and it is spoken for.
+
+So the design's premise, "`S2` is free", was wrong. The truth table, the pair allocation and
+every line of firmware are unaffected **as long as the replacement presents two independent
+closures to 0 V**, and all the candidates below can. `S2` itself must **never** be wired to
+the expander: its common is the frog, and tying it to 0 V shorts a stock rail to logic
+ground.
+
+### Candidate feedback sources
+
+Undecided. The choice depends on what the physical layout allows under each point.
+
+**A. Tie-bar or blade sensors, two per point.** Two microswitches, or two Hall-effect
+switches with a magnet on the tie-bar, one at each end of travel.
+
+- Reads **the blades**, which is what the backend's `confirmed` actually asserts. A dropped
+  linkage or a blade held off by debris shows as `unknown` or `mismatch`; the other options
+  report the motor or the frog and would call it `confirmed`.
+- Fully isolated from both DCC buses, and reads with track power off.
+- Cost: mechanical fitting per point, under the baseboard. A Hall part must be rated for a
+  3.3 V supply (the common A3144 needs 4.5 V) and be open-collector, so it looks like a
+  contact to 0 V.
+
+**B. Optos across the frog, sensing `S2`'s output.** One opto from the frog to each stock
+rail. The rail the frog is bonded to has no voltage across its opto; the other sees full
+track DCC and conducts. The phototransistor pulls its expander input to 0 V.
+
+- No mechanical work, and it fits the truth table directly: the frog is dead mid-throw
+  (break-before-make), so both go dark, which is the honest `unknown`.
+- DCC is bipolar, so the opto needs an AC input (H11AA1 or PC814 class) or an anti-parallel
+  diode, plus a series resistor sized for track voltage.
+- Reads **frog polarity, not blades**. It confirms `S2` moved, not that the point did.
+- **It reads nothing without track power.** Every point goes `unknown` whenever the track bus
+  is off, and the accessory bus exists for exactly that case: a loco shorts the track bus at
+  a wrongly set point, the booster cuts out, and the point is thrown to clear it. The throw
+  then cannot be confirmed, because the feedback died with the track bus. On a point at
+  `positionFeedback: 'required'` that is a confirmation `timeout`, which Safe-Stops. How the
+  backend treats a Safe Stop, a track power-off and a point `unknown` together has to be
+  checked in `bazauto/layout-orchestration` before this option is safe to rely on.
+
+**C. An add-on changeover driven by the Cobalt's linkage.** A separate microswitch or slide
+switch actuated by the motor's output. Isolated and power-independent like A, but reports the
+motor rather than the blades, and needs a mount per point.
+
+**Two inputs is the ceiling, not a compromise.** Whatever the source, two independent
+closures give every state the contract defines. There is no version of this design that
+benefits from a third input.
+
+References: DCC Concepts' [Cobalt iP Digital product page](https://www.dccconcepts.com/products/cobalt-ip-digital/)
+for the `S1`/`S2` description; a [DCC Concepts forum thread](https://www.dccconceptsforum.com/post/what-triggers-the-cobalt-ip-digital-frog-connector-to-switch-polarity-11281491)
+confirming `S1`'s frog polarity follows the motor's DCC input wires; and
+[US 9,662,591](https://patents.justia.com/patent/9662591), which describes Hall switches and a
+tie-bar magnet for exactly option A.
 
 ## Both inputs of a point stay on the same expander
 
@@ -114,8 +179,8 @@ installation* rule as the sensors: only points listed as installed are published
 unwired input pair reads both-open, which would publish a confident `unknown` for a point
 nothing is watching.
 
-**Which throw is `normal` is unverifiable authored data.** Nothing can determine from the
-wiring which way round a physical point is fitted, or which `S2` terminal corresponds to the
+**Which input is `normal` is unverifiable authored data.** Nothing can determine from the
+wiring which way round a physical point is fitted, or which feedback input corresponds to the
 orchestrator's `normal`. It must be established per point by throwing it and looking, exactly
 as `../layout-orchestration/docs/track-grid.md` D9 says of a point tile's leg mapping. Assume
 nothing from the terminal labels.
@@ -173,7 +238,7 @@ Every one of the five point fault kinds — `timeout`, `mismatch`, `indeterminat
 point no route holds (D4). All six points are `position_feedback: 'none'` today, so wiring the
 switches changes nothing until they are flipped to `'required'`.
 
-Flipping all six at once, on freshly wired microswitches, produces a layout that halts on the
+Flipping all six at once, on freshly wired feedback, produces a layout that halts on the
 first flaky contact with five other unproven points to rule out. Flip one, run it, leave it a
 while. The escape hatch is per point and immediate: setting a point back to `'none'` clears
 its latched fault.

@@ -86,7 +86,7 @@ honestly**, because the backend needs the live message to keep trusting the sens
 | ESP-AT modem | UART1, TX=GP8 RX=GP9, 9600 baud | Wired ethernet; reports `+ETH_GOT_IP` when ready |
 | LM-iD.1 detectors | board 1 (`0x20`) inputs | Current sensing. Open-drain, **5 V if Input A is ever powered** — `docs/block-detector-wiring.md` |
 | Waveshare IR reflective | board 2 (`0x21`) inputs | LM393, VCC 3.0–5.3 V, run at 3.3 V. Open-collector + on-board pull-up, so its high is asserted at the sensor |
-| Cobalt iP Digital points | board 3 (`0x22`), **planned** | Commanded over **DCC**, not MQTT — no feedback or query of its own. Position is read from its `S2` changeover only. `docs/point-position-feedback.md` |
+| Cobalt iP Digital points | board 3 (`0x22`), **planned** | Commanded over the **accessory DCC bus**, not MQTT, with no feedback or query of its own. Both of its changeovers are taken (`S2` powers the frog), so the feedback source is undecided. `docs/point-position-feedback.md` |
 
 ## Commands
 
@@ -112,8 +112,8 @@ The IO node is **deployed and working end to end** (#1, #2, #3). Both Goods Shed
 publish contract readings that the orchestrator trusts, and the block follows them.
 
 Point position feedback on board 3 (`0x22`) is **built but publishes nothing yet** (#15): the
-expander answers on the bus, no `S2` contacts are landed, so `POINTS_INSTALLED` is empty.
-Bring points up **one at a time** — every point fault kind Safe-Stops the whole layout,
+expander answers on the bus but `POINTS_INSTALLED` is empty, and **the feedback source is
+undecided**. The design assumed a free Cobalt `S2`, and there isn't one. Bring points up **one at a time** — every point fault kind Safe-Stops the whole layout,
 including a fault on a point no route holds.
 
 ```
@@ -123,7 +123,7 @@ src/lib/     -> device /lib
   layout_mqtt.py        The contract: sensor and point topics, payloads, QoS, retention,
                         the 25 s re-assert, and point query bookkeeping.
   sensor_wiring.py      Allocation vs installed, and the occupancy polarity. No `machine`.
-  point_wiring.py       Point allocation, and the S2 contact pair -> position. No `machine`.
+  point_wiring.py       Point allocation, and the feedback input pair -> position. No `machine`.
   node_startup.py       Retry-then-reset startup policy, and the LED code table. No `machine`.
   status_led.py         The onboard LED as a countable flash code. No `machine`.
   mcp23017_io.py        I2C expander, in and out. Poll-only.
@@ -168,15 +168,20 @@ directory on the path for the same reason.
   a modem still booting when the Pico reached `AT+RST` killed the node outright, with the LED
   never lighting — the intermittent "doesn't come up after a power cycle".
 - **A point is commanded and read by two devices that know nothing about each other.** The
-  Cobalt takes DCC accessory commands and can report nothing; position comes only from its
-  `S2` contacts on board 3. So `points.dcc_address` (orchestrator) and `pointId` → pins (here)
+  Cobalt takes DCC accessory commands and can report nothing; position comes only from a
+  feedback pair on board 3. So `points.dcc_address` (orchestrator) and `pointId` → pins (here)
   are independent mappings that nothing cross-checks — get one wrong and the system commands
   one motor while reading another, with both ends looking healthy
   (`docs/point-position-feedback.md`). The commissioning check is to throw each point
   **individually** and confirm the expected pair, and only that pair, moves.
-- **Which `S2` throw is `normal` is unverifiable authored data.** Nothing in the wiring reveals
-  which way round a point is fitted, or which terminal the orchestrator calls `normal`. It has
-  to be established per point by throwing it and looking. Assume nothing from terminal labels.
+- **The Cobalt has no free contact for feedback.** `S1` is tied to the motor's power input,
+  which is the accessory DCC bus, so it can't feed the frogs. `S2` therefore powers the frogs
+  from the track bus. **Never wire `S2` to the expander**: its common is the frog, and taking
+  it to 0 V shorts a stock rail to logic ground. The candidate feedback sources, and why
+  sensing the frog dies with track power, are in `docs/point-position-feedback.md`.
+- **Which feedback input is `normal` is unverifiable authored data.** Nothing in the wiring
+  reveals which way round a point is fitted, or which input the orchestrator calls `normal`.
+  It has to be established per point by throwing it and looking. Assume nothing from labels.
 - **A point's `unknown` is real and must not be debounced away.** A break-before-make
   changeover passes through both-open on every throw, so the honest sequence is
   `normal` → `unknown` → `reverse`. The backend expects it; its confirmation timeout is 8 s.
