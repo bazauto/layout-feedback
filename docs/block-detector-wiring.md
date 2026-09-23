@@ -47,7 +47,7 @@ transistor — a switch to ground and nothing else. With `A` powered, the same p
 5 V from an internal pull-up. The vendor's *"the LM-iD will act without outside power, but
 powering external devices needs a power source added"* is describing exactly this.
 
-**Occupied reads 0 in both modes**, which is why `config.py`'s `ACTIVE_LOW = True` is correct
+**Occupied reads 0 in both modes**, which is why `config.py`'s `LM_ID_ACTIVE_LOW = True` is correct
 regardless of how `A` is wired, and why the node has never mis-reported occupancy over this.
 
 ## Why this repo held two contradictory conclusions
@@ -142,7 +142,7 @@ LM-iD B ──┬── 74LVC14A input ──► MCP23017 input
 
 That is the closed-circuit principle #9 was reaching for, achieved with one 14-pin package
 per six channels and no change to the detectors. It requires `A` to be powered, and it
-requires `ACTIVE_LOW` to be flipped to `False`, because the inverter has moved the polarity.
+requires those sensors' `active_low` to be `False`, because the inverter has moved the polarity.
 
 **The important half is not the circuit, it is what it means:** powering `A` is what turns
 `clear` from an *absence of signal* into an *assertion*. With `A` unpowered, clear and
@@ -154,6 +154,12 @@ payload asserts nothing, and neither does an open circuit.
 Current position is unchanged — `A` stays unpowered while the layout is being brought up, and
 the broken-wire limitation stands as #9 describes it. This document records that the door #9
 believed was shut is open, and what it costs to walk through it.
+
+**Superseded as the plan for board 1 (2026-09).** Rather than powering `A` and adding an
+inverter, the LM-iD.1 is being replaced by the `bazauto/block-detection` board: a CT detector
+with a push-pull, **active-high** 3.3 V output, so a broken signal wire reads occupied against
+the expander's pull-up, with no level shifting. It is under bench test and not yet fitted to
+any sensor. The firmware side is ready: polarity is per sensor (`docs/pin-allocation.md`).
 
 ## The IR sensors are not these
 
@@ -172,10 +178,9 @@ which means, unlike an unpowered LM-iD, **its high level is asserted at the sens
 than being an absence. There is no 5 V hazard and no mode to get wrong. The module also brings
 out `AOUT` and a sensitivity potentiometer; neither is used.
 
-Both boards happen to read **active low**, so the single global `ACTIVE_LOW = True` is correct
-for both. That is a coincidence of two unrelated devices, not a property of the design —
-`main.py` passes `config.ACTIVE_LOW` for every sensor, so the first batch that disagrees makes
-it a per-sensor field.
+Both boards happen to read **active low**. That is a coincidence of two unrelated devices, not
+a property of the design, which is why polarity is a per-sensor field in `config.py` with one
+constant per device (`docs/pin-allocation.md`).
 
 ### The broken-wire exposure is still there, and it fails the other way
 

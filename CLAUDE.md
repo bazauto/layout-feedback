@@ -154,11 +154,11 @@ directory on the path for the same reason.
 - **Any `mpremote` command stops the running node**, dropping it to the raw REPL until the
   next reset.
 - `AT+MQTTPUB` honours backslash escaping, so JSON needs no `AT+MQTTPUBRAW`.
-- **Both boards read active low** — occupied/triggered is 0 — but they are different devices
-  and only agree by coincidence. `ACTIVE_LOW = True` is one global flag covering both
-  (`main.py` passes `config.ACTIVE_LOW` for every sensor); the day a batch disagrees, it has
-  to become per-sensor. An earlier "active high" note here was #8's, superseded by #11; see
-  `docs/block-detector-wiring.md`.
+- **Polarity is per sensor**, because it belongs to the device, not the board. Every
+  `SENSORS` entry names its device's constant (`LM_ID_ACTIVE_LOW`, `WAVESHARE_IR_ACTIVE_LOW`,
+  `BAZAUTO_BD_ACTIVE_LOW`), and startup refuses an entry without a real bool. Both fitted
+  devices read active low; the `bazauto/block-detection` board is active high. An earlier
+  "active high" note here was #8's, superseded by #11; see `docs/block-detector-wiring.md`.
 
 ### Traps
 
@@ -187,9 +187,10 @@ directory on the path for the same reason.
   `normal` → `unknown` → `reverse`. The backend expects it; its confirmation timeout is 8 s.
 - **A broken sensor wire reads as `clear`, not `occupied`** (#9). Both sensor types switch to
   ground, so an open circuit floats up to the pull-up — the permissive state. The re-assert
-  cannot catch it: the node is alive and republishing. Accepted knowingly — but #9 rejected
-  the closed-circuit fix on a premise since shown false, so it is reopened
-  (`docs/block-detector-wiring.md`).
+  cannot catch it: the node is alive and republishing. The fix for board 1 is the
+  `bazauto/block-detection` board, active high, so a broken signal wire reads occupied;
+  swap a `cs---` entry to `BAZAUTO_BD_ACTIVE_LOW` only after its wire-pull bench check.
+  Board 2 is still unfixed. Status in #9.
 - **A dead IR beam fails toward overrun, not toward stopping.** Same broken wire, different
   consequence: a `block_detection` sensor wrongly says empty track, an `ir_position` beam
   wrongly says *not yet reached*, so a berthing run never gets its stop trigger. Cheaper to
