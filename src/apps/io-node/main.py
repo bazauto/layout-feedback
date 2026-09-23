@@ -51,7 +51,11 @@ def get_expander(expanders, i2c, available, address, what):
 
 
 def build_sensors(i2c, available, expanders, wiring):
-    """Configure one input pin per installed sensor."""
+    """Configure one input pin per installed sensor, returned with its polarity.
+
+    The pull-up stays on for every sensor, whatever its polarity. For an active-high
+    device it is what makes a broken wire read `occupied` rather than float (#9).
+    """
     sensors = []
 
     for entry in wiring:
@@ -60,7 +64,7 @@ def build_sensors(i2c, available, expanders, wiring):
         pin = expander.create_pin(
             entry["pin"], mode="input", debounce_ms=config.DEBOUNCE_MS)
         pin.setup()
-        sensors.append((entry["sensor_id"], pin))
+        sensors.append((entry["sensor_id"], pin, entry["active_low"]))
 
     return sensors
 
@@ -171,7 +175,7 @@ def bring_up():
         on_publish_failure=lambda topic_id, exc: print(
             "io-node: publish failed for %s (%s)" % (topic_id, exc)),
     )
-    for sensor_id, _pin in sensors:
+    for sensor_id, _pin, _active_low in sensors:
         layout.register_sensor(sensor_id)
     for point_id, _normal, _reverse in points:
         layout.register_point(point_id)
@@ -185,8 +189,8 @@ def bring_up():
     # Publish what is on the track right now. Without this the first reading waits for
     # an edge, and a block occupied since before boot would never be reported at all.
     now = ticks_ms()
-    for sensor_id, pin in sensors:
-        layout.publish_sensor(sensor_id, is_occupied(pin.state, config.ACTIVE_LOW), now)
+    for sensor_id, pin, active_low in sensors:
+        layout.publish_sensor(sensor_id, is_occupied(pin.state, active_low), now)
     for point_id, normal_pin, reverse_pin in points:
         position, cross_wired = read_point(normal_pin, reverse_pin)
         if cross_wired:
@@ -201,10 +205,10 @@ def run(sensors, points, layout, client):
     while True:
         now = ticks_ms()
 
-        for sensor_id, pin in sensors:
+        for sensor_id, pin, active_low in sensors:
             if pin.update_state():
                 layout.publish_sensor(
-                    sensor_id, is_occupied(pin.state, config.ACTIVE_LOW), now)
+                    sensor_id, is_occupied(pin.state, active_low), now)
 
         for point_id, normal_pin, reverse_pin in points:
             # Both, every pass, and never short-circuited: a throw moves one contact

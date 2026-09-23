@@ -40,17 +40,26 @@ EXPANDER_CS = 0x20
 EXPANDER_IR = 0x21
 EXPANDER_POINTS = 0x22
 
-# The sensors are switches to ground: closed (conducting) when the block is occupied,
+# Output polarity, per device. Polarity belongs to the device on the far end of the wire,
+# not to the board or the node, so every SENSORS entry names the device it is.
+#
+# The two fitted devices are switches to ground: closed (conducting) when asserting,
 # open otherwise, with the MCP23017's internal pull-up holding the line high when open.
 # So occupied reads 0. Confirmed on the bench 2026-08-23 by scanning all 32 pins with a
 # loco in Goods Shed and again with it removed — pin 8 on both boards was the only one
 # that moved.
 #
-# **A broken wire reads as `clear`, not `occupied`** (#9). The pull-up gives a defined
-# level on an open circuit, but that level is the permissive one, so a severed wire
-# asserts empty track and the re-assert keeps confirming it. Accepted knowingly for now;
-# see #9 for the closed-circuit alternatives.
-ACTIVE_LOW = True
+# **For both, a broken wire reads as `clear`, not `occupied`** (#9). The pull-up gives a
+# defined level on an open circuit, but that level is the permissive one, so a severed
+# wire asserts empty track and the re-assert keeps confirming it.
+LM_ID_ACTIVE_LOW = True         # Legacy Models LM-iD.1, board 1: pulls to 0 V occupied
+WAVESHARE_IR_ACTIVE_LOW = True  # Waveshare IR (LM393), board 2: pulls to 0 V triggered
+
+# The bazauto/block-detection board drives its output push-pull: 3.3 V occupied, 0 V
+# clear. Against the pull-up a broken signal wire therefore reads **occupied** — the fix
+# for #9 on board 1. Not yet fitted to any sensor. Swap a board 1 entry to it only once
+# that channel has passed its wire-pull check on the bench (see #9).
+BAZAUTO_BD_ACTIVE_LOW = False
 
 DEBOUNCE_MS = 200
 
@@ -58,25 +67,42 @@ DEBOUNCE_MS = 200
 # and empty because Engine / Goods Transfer has current sensing and no IR beam.
 SENSORS = (
     # --- board 1, current sensing (block_detection) ---
-    {"sensor_id": "cs---fiddle-yard-1", "expander": EXPANDER_CS, "pin": 0},
-    {"sensor_id": "cs---fiddle-yard-2", "expander": EXPANDER_CS, "pin": 1},
-    {"sensor_id": "cs---siding-1", "expander": EXPANDER_CS, "pin": 2},
-    {"sensor_id": "cs---siding-2", "expander": EXPANDER_CS, "pin": 3},
-    {"sensor_id": "cs---siding-3", "expander": EXPANDER_CS, "pin": 4},
-    {"sensor_id": "cs---engine-goods-transfer", "expander": EXPANDER_CS, "pin": 5},
-    {"sensor_id": "cs---engine-shed-1", "expander": EXPANDER_CS, "pin": 6},
-    {"sensor_id": "cs---engine-shed-2", "expander": EXPANDER_CS, "pin": 7},
-    {"sensor_id": "cs---goods-shed", "expander": EXPANDER_CS, "pin": 8},
+    {"sensor_id": "cs---fiddle-yard-1", "expander": EXPANDER_CS, "pin": 0,
+     "active_low": LM_ID_ACTIVE_LOW},
+    {"sensor_id": "cs---fiddle-yard-2", "expander": EXPANDER_CS, "pin": 1,
+     "active_low": LM_ID_ACTIVE_LOW},
+    {"sensor_id": "cs---siding-1", "expander": EXPANDER_CS, "pin": 2,
+     "active_low": LM_ID_ACTIVE_LOW},
+    {"sensor_id": "cs---siding-2", "expander": EXPANDER_CS, "pin": 3,
+     "active_low": LM_ID_ACTIVE_LOW},
+    {"sensor_id": "cs---siding-3", "expander": EXPANDER_CS, "pin": 4,
+     "active_low": LM_ID_ACTIVE_LOW},
+    {"sensor_id": "cs---engine-goods-transfer", "expander": EXPANDER_CS, "pin": 5,
+     "active_low": LM_ID_ACTIVE_LOW},
+    {"sensor_id": "cs---engine-shed-1", "expander": EXPANDER_CS, "pin": 6,
+     "active_low": LM_ID_ACTIVE_LOW},
+    {"sensor_id": "cs---engine-shed-2", "expander": EXPANDER_CS, "pin": 7,
+     "active_low": LM_ID_ACTIVE_LOW},
+    {"sensor_id": "cs---goods-shed", "expander": EXPANDER_CS, "pin": 8,
+     "active_low": LM_ID_ACTIVE_LOW},
     # --- board 2, IR (ir_position) ---
-    {"sensor_id": "ir---fiddle-yard-1", "expander": EXPANDER_IR, "pin": 0},
-    {"sensor_id": "ir---fiddle-yard-2", "expander": EXPANDER_IR, "pin": 1},
-    {"sensor_id": "ir---siding-1", "expander": EXPANDER_IR, "pin": 2},
-    {"sensor_id": "ir---siding-2", "expander": EXPANDER_IR, "pin": 3},
-    {"sensor_id": "ir---siding-3", "expander": EXPANDER_IR, "pin": 4},
+    {"sensor_id": "ir---fiddle-yard-1", "expander": EXPANDER_IR, "pin": 0,
+     "active_low": WAVESHARE_IR_ACTIVE_LOW},
+    {"sensor_id": "ir---fiddle-yard-2", "expander": EXPANDER_IR, "pin": 1,
+     "active_low": WAVESHARE_IR_ACTIVE_LOW},
+    {"sensor_id": "ir---siding-1", "expander": EXPANDER_IR, "pin": 2,
+     "active_low": WAVESHARE_IR_ACTIVE_LOW},
+    {"sensor_id": "ir---siding-2", "expander": EXPANDER_IR, "pin": 3,
+     "active_low": WAVESHARE_IR_ACTIVE_LOW},
+    {"sensor_id": "ir---siding-3", "expander": EXPANDER_IR, "pin": 4,
+     "active_low": WAVESHARE_IR_ACTIVE_LOW},
     # pin 5 reserved — no IR beam on Engine / Goods Transfer
-    {"sensor_id": "ir---engine-shed-1", "expander": EXPANDER_IR, "pin": 6},
-    {"sensor_id": "ir---engine-shed-2", "expander": EXPANDER_IR, "pin": 7},
-    {"sensor_id": "ir---goods-shed", "expander": EXPANDER_IR, "pin": 8},
+    {"sensor_id": "ir---engine-shed-1", "expander": EXPANDER_IR, "pin": 6,
+     "active_low": WAVESHARE_IR_ACTIVE_LOW},
+    {"sensor_id": "ir---engine-shed-2", "expander": EXPANDER_IR, "pin": 7,
+     "active_low": WAVESHARE_IR_ACTIVE_LOW},
+    {"sensor_id": "ir---goods-shed", "expander": EXPANDER_IR, "pin": 8,
+     "active_low": WAVESHARE_IR_ACTIVE_LOW},
 )
 
 # Physically wired, and therefore the only sensors published. Both on Goods Shed, which
@@ -104,7 +130,7 @@ OUTPUTS = ()
 #
 # Each input is pulled to 0 V against the expander's pull-up when its side is made, so
 # a made input reads 0. Its own flag
-# rather than `ACTIVE_LOW` above: this is a third device that happens to agree with the
+# rather than the sensor polarities above: this is a third device that happens to agree with the
 # other two, and treating that coincidence as a rule is a mistake this repo has already
 # made once.
 POINTS_ACTIVE_LOW = True

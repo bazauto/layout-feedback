@@ -107,15 +107,29 @@ If in doubt, do not count — measure. `mpremote run` a scan of all 32 pins with
 triggered and see which one moves. That took under a minute and settled it definitively both
 times counting got it wrong.
 
-## Sensor polarity: active LOW
+## Sensor polarity: per sensor
 
-Both boards pull to ground when asserting — occupied on board 1, triggered on board 2 — with
-the internal pull-up holding the line high otherwise. **Occupied reads 0**, so `config.py` has
-`ACTIVE_LOW = True`.
+Polarity is a property of the device on the far end of the wire, not of the board or the
+node, so every `SENSORS` entry in `config.py` carries its own `active_low`, set from a
+per-device constant. There is no default: startup refuses an entry without one, or with
+anything other than `True` or `False`.
 
-**The two boards are different devices that agree by coincidence, not by design.** `main.py`
-passes one global `config.ACTIVE_LOW` for every sensor, so the first batch that disagrees
-makes it a per-sensor field rather than a config edit.
+Both fitted devices pull to ground when asserting — occupied on board 1, triggered on board
+2 — with the internal pull-up holding the line high otherwise. **Occupied reads 0**, so both
+constants are `True`. They are different devices that agree by coincidence, not by design.
+
+The `bazauto/block-detection` board, built to replace the LM-iD.1 on board 1, is the first
+that disagrees. It drives its output push-pull, 3.3 V when occupied, so it is
+`BAZAUTO_BD_ACTIVE_LOW = False`. Against the pull-up, a broken signal wire from it reads
+**occupied**, which is the point of it (#9). Moving a `cs---` entry onto it is a one-line
+change, to make only after that channel's wire-pull check on the bench. The pull-up has to
+stay on for those inputs: without it, the broken wire would float instead.
+
+| Constant | Device | Occupied reads |
+|---|---|---|
+| `LM_ID_ACTIVE_LOW = True` | Legacy Models LM-iD.1 | 0 |
+| `WAVESHARE_IR_ACTIVE_LOW = True` | Waveshare IR reflective | 0 |
+| `BAZAUTO_BD_ACTIVE_LOW = False` | `bazauto/block-detection` rev 1.0 | 1 |
 
 | Board | Device | Output |
 |---|---|---|

@@ -26,11 +26,20 @@ def select_installed(sensors, installed):
             sensor_id = entry["sensor_id"]
             expander = entry["expander"]
             pin = entry["pin"]
+            active_low = entry["active_low"]
         except (KeyError, TypeError):
             raise ValueError(
-                "every SENSORS entry needs sensor_id, expander and pin — got %r" % (entry,))
+                "every SENSORS entry needs sensor_id, expander, pin and active_low — got %r"
+                % (entry,))
 
         validate_sensor_id(sensor_id)
+
+        # No default, and nothing truthy standing in for a bool. Polarity is a property of
+        # the device on the far end of the wire, and a guessed one publishes `clear` for
+        # every occupied block that sensor watches.
+        if active_low is not True and active_low is not False:
+            raise ValueError(
+                "%s: active_low must be True or False — got %r" % (sensor_id, active_low))
 
         if sensor_id in by_id:
             raise ValueError("sensor id %r appears twice in SENSORS" % sensor_id)
@@ -69,9 +78,9 @@ def is_occupied(level, active_low):
 
     One line, and it has its own name because getting it backwards publishes `clear`
     for an occupied block — which for a block_detection sensor is enough on its own to
-    let the orchestrator clear the block. Westgate Hollow's block detectors are active
-    **low** — occupied reads 0 (measured, see docs/pin-allocation.md). The polarity stays
-    configurable because the next batch of hardware may not be, and because fitting the
-    inverting stage in docs/block-detector-wiring.md would flip this one.
+    let the orchestrator clear the block. `active_low` comes from the sensor's own
+    SENSORS entry, because it is a property of the device on the far end of the wire:
+    the LM-iD.1 detectors and the IR modules are active low, the bazauto/block-detection
+    board is active high (see docs/pin-allocation.md).
     """
     return (level == 0) if active_low else (level == 1)

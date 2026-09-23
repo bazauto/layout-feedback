@@ -117,7 +117,7 @@ def is_closed(level, active_low):
 
     Each input is pulled to 0 V when its side is made, whether by a contact, an opto or a
     Hall switch, so a made input reads 0 against the internal pull-up. Its own flag rather
-    than the sensors' `ACTIVE_LOW`: this is a third device that happens to agree with the
+    than the sensors' per-device polarity: this is a third device that happens to agree with the
     other two, and the repo has already been bitten once by treating a coincidence as a
     rule.
     """
