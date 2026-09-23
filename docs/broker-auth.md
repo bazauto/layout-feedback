@@ -29,15 +29,20 @@ broker change, because of the failure described next.
 Under MQTT 3.1.1, mosquitto drops a publish that the ACL denies, and it still acknowledges
 that publish to the client. `publish()` returns True and the node believes it is
 reporting, but nobody hears it. That is exactly the failure rule 3 in `CLAUDE.md` exists
-to prevent, and the node cannot detect it. The only trace is on the broker:
+to prevent, and the node cannot detect it.
+
+**The broker log doesn't record it either.** Mosquitto 2.0.18 logs `Denied PUBLISH`
+only at debug level, which the bench does not run. This was checked on 2026-09-23: three
+denied publishes left nothing in the log. The one way to see a denial is to subscribe
+and check whether the message arrives:
 
 ```
-ssh pbarrett@172.18.10.240 'bash -lc "sudo grep Denied /var/log/mosquitto/mosquitto.log | tail"'
+ssh pbarrett@172.18.10.240 'bash -lc "mosquitto_sub -h localhost -t \"layout/#\" -v -W 40"'
 ```
 
-When a node is up with a solid LED but a topic is missing, look there first. A
-contract change that adds a topic this node publishes needs this ACL updated in the
-same change.
+When a node is up with a solid LED but one of its topics never shows up there, suspect
+the ACL before the node. A contract change that adds a topic this node publishes needs
+this ACL updated in the same change.
 
 ## Where the secrets live
 
@@ -116,9 +121,22 @@ identity can't be revoked without taking both boards off the air.
 
 ## Verifying
 
-- An anonymous client is refused: `mosquitto_sub -h 172.18.10.240 -t '#' -u '' -W 3`
-  from another machine exits with `Connection Refused: not authorised`.
-- `monitor` works from the LAN: `mosquitto_sub -h 172.18.10.240 -u monitor -P … -t 'layout/#' -v`.
-- The node's readings arrive every 25 s, and the orchestrator shows its blocks trusted.
-- `io-node` can't command. Publish to `point/+/command` with its credentials, and the
-  broker logs `Denied PUBLISH from layout-feedback-io-node`.
+All of these were run at cutover on 2026-09-23.
+
+- **Every client connects with its own user.** The broker log shows `u'orchestrator'`
+  and `u'io-node'` on each connect. The node reconnected by itself after a broker
+  restart, so its credentials survive a reconnect.
+- **Anonymous and wrong-password clients are refused from the LAN**, with
+  `Connection refused: Not authorized`. This was run from the dev machine.
+- **`monitor` can read over the LAN address.** Run
+  `mosquitto_sub -h 172.18.10.240 -t 'layout/+/sensor/#'` on the bench, where it picks up
+  `~/.config/mosquitto_sub`.
+- **The ACL denies what it should.** Subscribe as `monitor` to an all-zero layoutId's
+  namespace, so nothing real can act on the probes. Then publish:
+  - `io-node` → `point/acl-probe/command`
+  - `io-node` → `sensor/acl-probe/reading` under that id, which tests the pin to the real
+    layoutId
+  - `monitor` → anything
+
+  All three are dropped. An `orchestrator` publish to the same namespace is the
+  positive control, and it arrives. Without that control an empty result proves nothing.

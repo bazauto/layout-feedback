@@ -168,7 +168,8 @@ directory on the path for the same reason.
   (#7). The node's password is not in git: it lives on the bench in
   `~/.config/layout-feedback/<node>.json`, and `deploy.sh` copies it to the board every
   time. A new topic this node publishes needs `/etc/mosquitto/acl` changed as well, or it
-  gets acknowledged and goes nowhere. See `docs/broker-auth.md`.
+  gets acknowledged and goes nowhere. Nothing appears in the broker log either. See
+  `docs/broker-auth.md`.
 
 - **A node that cannot start flashes a code and reboots — it no longer dies quietly.**
   Solid LED is running, `N` flashes is a failure at stage `N`, dark is no power or a hard
