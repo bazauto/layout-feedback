@@ -10,7 +10,7 @@ import pytest
 
 from mqtt_at import BrokerUnreachable, ModemNotResponding, NetworkNotReady
 from node_startup import (
-    CODE_BROKER, CODE_MODEM, CODE_NETWORK, CODE_RUNTIME, CODE_SENSORS, CODE_UNKNOWN,
+    CODE_BROKER, CODE_CREDENTIALS, CODE_MODEM, CODE_NETWORK, CODE_RUNTIME, CODE_SENSORS, CODE_UNKNOWN,
     RETRY_BACKOFF_MS, SensorWiringError, StartupFailed, code_for_error, start_supervised,
 )
 
@@ -58,7 +58,7 @@ def test_an_unrecognised_failure_still_gets_a_code():
 
 def test_the_codes_are_all_distinct_and_countable():
     codes = [CODE_SENSORS, CODE_MODEM, CODE_NETWORK, CODE_BROKER, CODE_RUNTIME,
-             CODE_UNKNOWN]
+             CODE_UNKNOWN, CODE_CREDENTIALS]
     assert len(set(codes)) == len(codes)
     assert min(codes) >= 2, "a single flash is too easily confused with a boot blink"
 

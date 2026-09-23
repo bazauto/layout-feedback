@@ -83,9 +83,10 @@ flashing is easier to find than one that is simply dark.
 | **2** | Sensors | A configured expander is not on the I2C bus | Ribbon to boards 1/2, `config.py` addresses |
 | **3** | Modem | The ESP-AT modem is not answering AT commands | UART wiring GP8/GP9, modem power |
 | **4** | Network | The modem answers, but never reported an IP | Ethernet cable, DHCP, switch port |
-| **5** | Broker | Network is up, the MQTT link could not be made | Mosquitto on the bench box, `MQTT_HOST` |
+| **5** | Broker | Network is up, the MQTT link could not be made — including credentials the broker rejected | Mosquitto on the bench box, `MQTT_HOST`; `not authorised` in its log (`docs/broker-auth.md`) |
 | **6** | Runtime | The node came up, then the main loop crashed | USB console — this one is a bug, not wiring |
 | **7** | Unknown | Something else | USB console |
+| **8** | Credentials | No usable `/mqtt_credentials.json` on the board | Redeploy with `scripts/deploy.sh`; `docs/broker-auth.md` |
 
 Codes start at 2 on purpose. A single flash is too easily confused with a board merely
 blinking on boot, and a miscounted code is worse than no code.

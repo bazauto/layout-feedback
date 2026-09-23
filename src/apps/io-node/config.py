@@ -24,6 +24,9 @@ LAYOUT_ID = "c4e587aa-478d-46ab-a1df-9dd8359fc040"
 MQTT_CLIENT_ID = "layout-feedback-io-node"
 
 MQTT_HOST = "172.18.10.240"
+# The broker refuses anonymous clients. Username and password are not in git: deploy.sh
+# copies them onto the board from the bench box. See docs/broker-auth.md.
+MQTT_CREDENTIALS_FILE = "/mqtt_credentials.json"
 MQTT_PORT = 1883
 MQTT_UART_ID = 1
 MQTT_TX_PIN = 8

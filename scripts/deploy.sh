@@ -16,6 +16,12 @@ STAGING="/tmp/layout-feedback-deploy"
 # them is PicoDCC's debug probe.
 BOARD_ID="${LAYOUT_FEEDBACK_BOARD_ID:-0d9a62134acbf42d}"
 
+# The node's broker username and password (#7). The only copy lives on the bench box, so
+# it never passes through git or this machine; every deploy copies it onto the board.
+# Tilde expands on the bench, not here. See docs/broker-auth.md.
+CREDENTIALS_DIR='~/.config/layout-feedback'
+BOARD_CREDENTIALS=":/mqtt_credentials.json"
+
 NODE="${1:-}"
 DRY_RUN=0
 [ "${2:-}" = "--dry-run" ] && DRY_RUN=1
@@ -53,7 +59,17 @@ if [ "$DRY_RUN" = 1 ]; then
   echo "   $APP_DIR/  -> $STAGING/$NODE/app/"
   echo "(dry run) would then copy to the board and soft-reset:"
   echo "   /lib/*.py from lib/, /main.py and /config.py from app/"
+  echo "   $BOARD_CREDENTIALS from $BENCH:$CREDENTIALS_DIR/$NODE.json"
   exit 0
+fi
+
+# Before anything touches the board: without its credentials the node flashes code 8
+# forever, and a deploy that leaves it that way should not report success.
+echo "== credentials =="
+if ! ssh "$BENCH" "bash -lc 'test -s $CREDENTIALS_DIR/$NODE.json'"; then
+  echo "no broker credentials for $NODE at $BENCH:$CREDENTIALS_DIR/$NODE.json" >&2
+  echo "see docs/broker-auth.md — refusing to deploy" >&2
+  exit 1
 fi
 
 # scp rather than rsync: Git Bash on Windows ships no rsync, and the staging directory
@@ -95,6 +111,12 @@ for f in app/*.py; do
   echo "   \$f -> :/\$(basename \$f)"
   \$MP fs cp "\$f" ":/\$(basename \$f)" || exit 1
 done
+
+echo "-- credentials --"
+# From the bench's own copy, never the staging directory: the secret is not staged.
+# Not a .py, so the root sweep above leaves it alone and nothing can import it.
+echo "   $CREDENTIALS_DIR/$NODE.json -> $BOARD_CREDENTIALS"
+\$MP fs cp $CREDENTIALS_DIR/$NODE.json "$BOARD_CREDENTIALS" >/dev/null || exit 1
 
 echo "-- reset --"
 \$MP reset
