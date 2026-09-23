@@ -105,6 +105,13 @@ ssh pbarrett@172.18.10.240 'bash -lc "sudo apt install -y pipx mosquitto-clients
 ssh pbarrett@172.18.10.240 'bash -lc "pipx install mpremote && pipx ensurepath"'
 ```
 
+The broker refuses anonymous clients (#7). A node's password lives only on the bench, at
+`~/.config/layout-feedback/<node>.json`, and the script copies it to the board on every
+deploy. It **refuses to deploy** if that file is missing, so treat that as a provisioning gap
+and not as a deploy bug. `mosquitto_sub` on the bench picks up the read-only `monitor`
+identity from `~/.config/mosquitto_sub`. Creating either file is covered in
+`docs/broker-auth.md` and needs the user's approval.
+
 `python3-mpremote` is **not** in Mint 22.3's archive, and Ubuntu 24.04 bases are PEP 668
 managed, so `pip install` into the system Python is refused — hence `pipx`. If a script fails
 because `mpremote` is missing, report that as the reason rather than as a deploy failure.

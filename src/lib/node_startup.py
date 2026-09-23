@@ -20,6 +20,7 @@ that is the only thing anybody can see (`status_led.py`).
 | 5    | Broker           | Network is up, but the MQTT link could not be made     |
 | 6    | Runtime          | The node came up, then the main loop crashed           |
 | 7    | Unknown          | Something else — read the USB console                  |
+| 8    | Credentials      | No usable broker credentials on the board — redeploy   |
 
 Codes start at 2 deliberately. A single flash is too easily confused with a board that
 is merely blinking on boot, and a code that gets miscounted is worse than no code.
@@ -29,6 +30,7 @@ provable on the host — including that it eventually resets, which is not somet
 want to discover by watching a baseboard.
 """
 
+from broker_credentials import CredentialsError
 from mqtt_at import BrokerUnreachable, ModemNotResponding, NetworkNotReady
 
 
@@ -38,6 +40,8 @@ CODE_NETWORK = 4
 CODE_BROKER = 5
 CODE_RUNTIME = 6
 CODE_UNKNOWN = 7
+# After UNKNOWN rather than renumbering it: 2-7 are already being counted on the bench.
+CODE_CREDENTIALS = 8
 
 # Three attempts, flashing for 2 s, 5 s and 10 s between them, then a hard reset — about
 # 17 s of trying before the board goes round again.
@@ -75,6 +79,8 @@ def code_for_error(exc):
         return CODE_NETWORK
     if isinstance(exc, BrokerUnreachable):
         return CODE_BROKER
+    if isinstance(exc, CredentialsError):
+        return CODE_CREDENTIALS
     return CODE_UNKNOWN
 
 
@@ -102,6 +108,6 @@ def start_supervised(attempt, on_failure, reset, backoff_ms=RETRY_BACKOFF_MS):
 
 __all__ = [
     "CODE_SENSORS", "CODE_MODEM", "CODE_NETWORK", "CODE_BROKER", "CODE_RUNTIME",
-    "CODE_UNKNOWN", "RETRY_BACKOFF_MS", "SensorWiringError", "StartupFailed",
+    "CODE_UNKNOWN", "CODE_CREDENTIALS", "RETRY_BACKOFF_MS", "SensorWiringError", "StartupFailed",
     "code_for_error", "start_supervised",
 ]

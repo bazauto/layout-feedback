@@ -11,6 +11,7 @@ REPL that nobody is watching.
 from machine import I2C, Pin, reset
 from utime import sleep_ms, ticks_ms
 
+from broker_credentials import load_credentials
 from layout_mqtt import LayoutMQTT
 from mcp23017_io import MCP23017Expander
 from mqtt_at import BrokerUnreachable, MQTTATClient
@@ -157,11 +158,16 @@ def bring_up():
     sensors = build_sensors(i2c, available, expanders, wiring)
     points = build_points(i2c, available, expanders, point_wiring)
 
+    # Before the modem, so a board deployed without its credentials flashes that, not a
+    # broker fault.
+    username, password = load_credentials(config.MQTT_CREDENTIALS_FILE)
+
     client = MQTTATClient(
         host=config.MQTT_HOST, port=config.MQTT_PORT,
         uart_id=config.MQTT_UART_ID, tx_pin=config.MQTT_TX_PIN,
         rx_pin=config.MQTT_RX_PIN, baud=config.MQTT_BAUD,
         client_id=config.MQTT_CLIENT_ID,
+        username=username, password=password,
     )
     try:
         client.setup()

@@ -178,7 +178,7 @@ def _take_frame(buf):
 
 
 class MQTTATClient:
-    def __init__(self, host: str, port: int = 1883, uart=None, uart_id=1, tx_pin=8, rx_pin=9, baud=115200, keepalive: int = 1, timeout_ms=2000, debug: bool = False, client_id: str = 'sensors'):
+    def __init__(self, host: str, port: int = 1883, uart=None, uart_id=1, tx_pin=8, rx_pin=9, baud=115200, keepalive: int = 1, timeout_ms=2000, debug: bool = False, client_id: str = 'sensors', username: str = '', password: str = ''):
         """Create client bound to a single broker address.
 
         - `host` and `port` are used to connect on `setup()` and kept for diagnostics.
@@ -190,6 +190,10 @@ class MQTTATClient:
         # Distinct per node: two clients sharing an MQTT client id knock each other off
         # the broker in a reconnect loop, which looks exactly like flaky hardware.
         self.client_id = client_id
+        # Empty means anonymous. The production broker refuses that (#7); the node's
+        # identity comes from `broker_credentials.py`.
+        self.username = username
+        self.password = password
         self.uart_id = uart_id
         self.tx_pin = tx_pin
         self.rx_pin = rx_pin
@@ -290,7 +294,10 @@ class MQTTATClient:
             self._dump('post-reset')
             raise NetworkNotReady('Network device did not report IP after reset')
 
-        config_cmd = 'AT+MQTTUSERCFG=0,1,"%s","","",0,0,""' % self.client_id
+        config_cmd = 'AT+MQTTUSERCFG=0,1,"%s","%s","%s",0,0,""' % (
+            self._escape_at_string(self.client_id),
+            self._escape_at_string(self.username),
+            self._escape_at_string(self.password))
         if not self.send_at_and_wait(config_cmd, timeout_ms=50000):
             self._dump('base config')
             raise BrokerUnreachable('set_base_config returned ERROR or timed out')
@@ -327,10 +334,17 @@ class MQTTATClient:
             # best-effort: ignore write errors so callers can continue
             pass
 
+    def _redact(self, text):
+        # The modem echoes `AT+MQTTUSERCFG` back, so the password would otherwise reach
+        # the console through both the debug log and a failure dump.
+        if self.password:
+            return text.replace(self._escape_at_string(self.password), '<password>')
+        return text
+
     def _log(self, msg: str):
         try:
             if self.debug:
-                print('[MQTTAT]', msg)
+                print('[MQTTAT]', self._redact(msg))
         except Exception:
             pass
 
@@ -547,7 +561,7 @@ class MQTTATClient:
 
     def _record_line(self, text):
         try:
-            self._recent_lines.append(text)
+            self._recent_lines.append(self._redact(text))
             if len(self._recent_lines) > self._max_recent_lines:
                 self._recent_lines.pop(0)
         except Exception:

@@ -154,3 +154,52 @@ def test_the_startup_failures_are_still_runtime_errors(uart):
     """They subclass RuntimeError, which is what callers already catch."""
     for failure in (ModemNotResponding, NetworkNotReady, BrokerUnreachable):
         assert issubclass(failure, RuntimeError)
+
+
+# --- the broker identity (#7) -----------------------------------------------
+
+def usercfg(uart):
+    return [line for line in uart.sent_lines if line.startswith("AT+MQTTUSERCFG=")]
+
+
+def test_the_username_and_password_reach_the_modem(uart):
+    client = make_client(uart, client_id="layout-feedback-io-node",
+                         username="io-node", password="s3cretPassw0rd")
+    uart.auto_reply = booting_modem()
+
+    client.setup()
+
+    assert usercfg(uart) == [
+        'AT+MQTTUSERCFG=0,1,"layout-feedback-io-node","io-node","s3cretPassw0rd",0,0,""']
+
+
+def test_without_credentials_the_client_connects_anonymously(uart):
+    """The library stays usable against a throwaway broker; the node is what insists."""
+    client = make_client(uart, client_id="spike")
+    uart.auto_reply = booting_modem()
+
+    client.setup()
+
+    assert usercfg(uart) == ['AT+MQTTUSERCFG=0,1,"spike","","",0,0,""']
+
+
+def test_the_password_never_reaches_the_console(uart, capsys):
+    """The modem echoes USERCFG, and a failed connect dumps what the modem said."""
+    client = make_client(uart, username="io-node", password="s3cretPassw0rd", debug=True)
+
+    modem = booting_modem(broker="refused")
+
+    def reply(line):
+        if line.startswith("AT+MQTTUSERCFG="):
+            uart.feed_line(line)  # the echo
+        return modem(line)
+
+    uart.auto_reply = reply
+
+    with pytest.raises(BrokerUnreachable):
+        client.setup()
+
+    out = capsys.readouterr().out
+    assert "AT+MQTTUSERCFG" in out, "the test must actually have logged the command"
+    assert "s3cretPassw0rd" not in out
+    assert all("s3cretPassw0rd" not in line for line in client._recent_lines)

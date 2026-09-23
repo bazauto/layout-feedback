@@ -22,6 +22,7 @@ Reasoning belongs in `docs/`.
 | `docs/pin-allocation.md` | Which sensor is on which expander pin, and why allocation is not installation |
 | `docs/block-detector-wiring.md` | The LM-iD output stage: its two modes, why Input A is unpowered, the 3.3 V hazard if it is not |
 | `docs/point-position-feedback.md` | Board 3 (`0x22`): why two inputs per point, the `0x22` allocation, and why command and feedback being different devices is the hazard. **Firmware built; no `S2` wiring landed** |
+| `docs/broker-auth.md` | Broker identities, the ACL, where the node's password lives, and why a denied publish is silent |
 | `docs/startup-and-status-led.md` | The power-on race with the modem, the retry-then-reset policy, and **what the LED flash codes mean** |
 | `docs/DEVELOPMENT_NOTES.md` | Module conventions, the MCP23017 pin map, hardware wiring |
 | `docs/PN7150_STATE_MACHINE_PLAN.md` | The NCI state machine the RFID reader implements |
@@ -125,6 +126,7 @@ src/lib/     -> device /lib
   sensor_wiring.py      Allocation vs installed, and the occupancy polarity. No `machine`.
   point_wiring.py       Point allocation, and the feedback input pair -> position. No `machine`.
   node_startup.py       Retry-then-reset startup policy, and the LED code table. No `machine`.
+  broker_credentials.py Reads the board's /mqtt_credentials.json. No `machine`.
   status_led.py         The onboard LED as a countable flash code. No `machine`.
   mcp23017_io.py        I2C expander, in and out. Poll-only.
   input_pin_monitor.py  Native Pico GPIO, IRQ + timer debounce. Currently unused.
@@ -161,6 +163,12 @@ directory on the path for the same reason.
   "active high" note here was #8's, superseded by #11; see `docs/block-detector-wiring.md`.
 
 ### Traps
+
+- **The broker refuses anonymous clients, and its ACL drops a denied publish silently**
+  (#7). The node's password is not in git: it lives on the bench in
+  `~/.config/layout-feedback/<node>.json`, and `deploy.sh` copies it to the board every
+  time. A new topic this node publishes needs `/etc/mosquitto/acl` changed as well, or it
+  gets acknowledged and goes nowhere. See `docs/broker-auth.md`.
 
 - **A node that cannot start flashes a code and reboots — it no longer dies quietly.**
   Solid LED is running, `N` flashes is a failure at stage `N`, dark is no power or a hard
