@@ -164,12 +164,18 @@ wire it to its allocated pin, add its id to the installed list, deploy.
 
 ## Currently installed
 
-Two, both on the **Goods Shed** block:
+Two, on different blocks (2026-09-25):
 
 | Board | Pin | Port | Chip pin | `sensorId` |
 |---|---|---|---|---|
-| 1 (`0x20`) | 8 | GPB0 | 1 | `cs---goods-shed` |
+| 1 (`0x20`) | 7 | GPA7 | 28 | `cs---engine-shed-2` |
 | 2 (`0x21`) | 8 | GPB0 | 1 | `ir---goods-shed` |
+
+`cs---goods-shed` came out of `INSTALLED` when its LM-iD.1 was removed. Goods Shed now has
+only its beam, and an `ir_position` `clear` is a no-op downstream, so **that block can go
+occupied but can never clear** until a detector is back on board 1 pin 8. The orchestrator
+also stops hearing `cs---goods-shed`, marks it untrusted, and treats the block as `unknown`
+(occupied). Both are the fail-safe direction.
 
 **No points.** Board 3 is fitted and answers on the bus, but no feedback source has been
 chosen or wired, so `POINTS_INSTALLED` is empty and nothing is published on any `point/*/reading`. Bring points up
@@ -177,7 +183,7 @@ chosen or wired, so `POINTS_INSTALLED` is empty and nothing is published on any 
 point no route holds, so flipping all six to `positionFeedback: "required"` at once produces a
 layout that halts on the first flaky contact with five other unproven points to rule out.
 
-Two things follow from this being the pair brought up first, both of which paid off:
+Goods Shed's two sensors were the pair brought up first, and two things followed from that, both of which paid off:
 
 - **Goods Shed is the only block with both a CS and an IR sensor installed**, so the bring-up
   exercised the occupancy derivation rather than one sensor in isolation. That proved its
