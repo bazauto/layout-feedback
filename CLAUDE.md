@@ -20,7 +20,7 @@ Reasoning belongs in `docs/`.
 |---|---|
 | `../layout-orchestration/docs/mqtt-contract.md` | **Binding.** Topics, payloads, QoS, retention, the 30 s re-assert. This repo does not own it and must never amend it. |
 | `docs/pin-allocation.md` | Which sensor is on which expander pin, and why allocation is not installation |
-| `docs/block-detector-wiring.md` | The LM-iD output stage: its two modes, why Input A is unpowered, the 3.3 V hazard if it is not |
+| `docs/block-detector-wiring.md` | The retired LM-iD output stage: its two modes, the 5 V hazard if Input A is powered. Read before refitting one |
 | `docs/point-position-feedback.md` | Board 3 (`0x22`): why two inputs per point, the `0x22` allocation, and why command and feedback being different devices is the hazard. **Firmware built; no `S2` wiring landed** |
 | `docs/broker-auth.md` | Broker identities, the ACL, where the node's password lives, and why a denied publish is silent |
 | `docs/startup-and-status-led.md` | The power-on race with the modem, the retry-then-reset policy, and **what the LED flash codes mean** |
@@ -85,7 +85,7 @@ honestly**, because the backend needs the live message to keep trusting the sens
 | PN7150 NFC | I2C1, SDA=GP2 SCL=GP3, addr `0x28` | NCI + IRQ. IRQ means "a message is ready", **not** "a tag is present". |
 | TCA9548A mux | I2C1, addr `0x70` | Fans I2C1 out to up to 8 PN7150 readers |
 | ESP-AT modem | UART1, TX=GP8 RX=GP9, 9600 baud | Wired ethernet; reports `+ETH_GOT_IP` when ready |
-| LM-iD.1 detectors | board 1 (`0x20`) inputs | Current sensing. Open-drain, **5 V if Input A is ever powered** — `docs/block-detector-wiring.md` |
+| `bazauto/block-detection` | board 1 (`0x20`) inputs | Current sensing. Push-pull 3.3 V, **active high**: a broken signal wire reads occupied. Replaced the LM-iD.1 |
 | Waveshare IR reflective | board 2 (`0x21`) inputs | LM393, VCC 3.0–5.3 V, run at 3.3 V. Open-collector + on-board pull-up, so its high is asserted at the sensor |
 | Cobalt iP Digital points | board 3 (`0x22`), **planned** | Commanded over the **accessory DCC bus**, not MQTT, with no feedback or query of its own. Both of its changeovers are taken (`S2` powers the frog), so the feedback source is undecided. `docs/point-position-feedback.md` |
 
@@ -158,8 +158,8 @@ directory on the path for the same reason.
 - `AT+MQTTPUB` honours backslash escaping, so JSON needs no `AT+MQTTPUBRAW`.
 - **Polarity is per sensor**, because it belongs to the device, not the board. Every
   `SENSORS` entry names its device's constant (`LM_ID_ACTIVE_LOW`, `WAVESHARE_IR_ACTIVE_LOW`,
-  `BAZAUTO_BD_ACTIVE_LOW`), and startup refuses an entry without a real bool. Both fitted
-  devices read active low; the `bazauto/block-detection` board is active high. An earlier
+  `BAZAUTO_BD_ACTIVE_LOW`), and startup refuses an entry without a real bool. Board 1 is all
+  `bazauto/block-detection`, active high (2026-09-25); board 2's IR is active low. An earlier
   "active high" note here was #8's, superseded by #11; see `docs/block-detector-wiring.md`.
 
 ### Traps
@@ -194,18 +194,17 @@ directory on the path for the same reason.
 - **A point's `unknown` is real and must not be debounced away.** A break-before-make
   changeover passes through both-open on every throw, so the honest sequence is
   `normal` → `unknown` → `reverse`. The backend expects it; its confirmation timeout is 8 s.
-- **A broken sensor wire reads as `clear`, not `occupied`** (#9). Both sensor types switch to
-  ground, so an open circuit floats up to the pull-up — the permissive state. The re-assert
-  cannot catch it: the node is alive and republishing. The fix for board 1 is the
+- **A broken IR wire reads as `clear`, not `occupied`** (#9). The IR switches to ground, so
+  an open circuit floats up to the pull-up — the permissive state. The re-assert cannot
+  catch it: the node is alive and republishing. Board 1 is fixed by the
   `bazauto/block-detection` board, active high, so a broken signal wire reads occupied;
-  swap a `cs---` entry to `BAZAUTO_BD_ACTIVE_LOW` only after its wire-pull bench check.
-  Board 2 is still unfixed. Status in #9.
+  the supply- and ground-wire pulls are still to be recorded in #9. Board 2 is still
+  unfixed.
 - **A dead IR beam fails toward overrun, not toward stopping.** Same broken wire, different
   consequence: a `block_detection` sensor wrongly says empty track, an `ir_position` beam
   wrongly says *not yet reached*, so a berthing run never gets its stop trigger. Cheaper to
   supervise than the detectors — they already run at 3.3 V — but nothing is fitted (#9).
-- **The block detectors' Input A is deliberately unpowered, and that is load-bearing.**
-  Powering it — which every manufacturer datasheet tells you to do — makes the output idle at
+- **If an LM-iD.1 is ever refitted, its Input A must stay unpowered.** Powering it — which every manufacturer datasheet tells you to do — makes the output idle at
   **5 V** into 3.3 V expander inputs. Do not wire it without reading
   `docs/block-detector-wiring.md`.
 - **You cannot determine this sensor's polarity by reading an expander pin.** A floating

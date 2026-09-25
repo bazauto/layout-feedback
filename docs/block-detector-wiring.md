@@ -158,8 +158,10 @@ believed was shut is open, and what it costs to walk through it.
 **Superseded as the plan for board 1 (2026-09).** Rather than powering `A` and adding an
 inverter, the LM-iD.1 is being replaced by the `bazauto/block-detection` board: a CT detector
 with a push-pull, **active-high** 3.3 V output, so a broken signal wire reads occupied against
-the expander's pull-up, with no level shifting. It is under bench test and not yet fitted to
-any sensor. The firmware side is ready: polarity is per sensor (`docs/pin-allocation.md`).
+the expander's pull-up, with no level shifting. **Done 2026-09-25:** the LM-iD.1 on Goods Shed has been
+removed and every board 1 entry is on `BAZAUTO_BD_ACTIVE_LOW` (`docs/pin-allocation.md`). The
+rest of this document describes hardware no longer fitted, kept because refitting an LM-iD
+without reading it reintroduces the 5 V hazard.
 
 ## The IR sensors are not these
 

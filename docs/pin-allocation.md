@@ -114,32 +114,33 @@ node, so every `SENSORS` entry in `config.py` carries its own `active_low`, set 
 per-device constant. There is no default: startup refuses an entry without one, or with
 anything other than `True` or `False`.
 
-Both fitted devices pull to ground when asserting — occupied on board 1, triggered on board
-2 — with the internal pull-up holding the line high otherwise. **Occupied reads 0**, so both
-constants are `True`. They are different devices that agree by coincidence, not by design.
+**Board 1 is active high.** The `bazauto/block-detection` board replaced the LM-iD.1 on
+2026-09-25, and every `cs---` entry uses `BAZAUTO_BD_ACTIVE_LOW = False`: it drives its output
+push-pull, 3.3 V when occupied. Against the pull-up, a broken signal wire from it reads
+**occupied**, which is the point of it (#9). The pull-up has to stay on for those inputs:
+without it, the broken wire would float instead. Only installed entries are published, so the
+unconnected detectors are silent until each is added to `INSTALLED`.
 
-The `bazauto/block-detection` board, built to replace the LM-iD.1 on board 1, is the first
-that disagrees. It drives its output push-pull, 3.3 V when occupied, so it is
-`BAZAUTO_BD_ACTIVE_LOW = False`. Against the pull-up, a broken signal wire from it reads
-**occupied**, which is the point of it (#9). Moving a `cs---` entry onto it is a one-line
-change, to make only after that channel's wire-pull check on the bench. The pull-up has to
-stay on for those inputs: without it, the broken wire would float instead.
+**Board 2 is active low.** The Waveshare IR pulls to ground when triggered, with the internal
+pull-up holding the line high otherwise, so a broken wire there still reads `clear`.
+
+`LM_ID_ACTIVE_LOW` is kept for the record but is no longer used by any entry.
 
 | Constant | Device | Occupied reads |
 |---|---|---|
-| `LM_ID_ACTIVE_LOW = True` | Legacy Models LM-iD.1 | 0 |
+| `LM_ID_ACTIVE_LOW = True` | Legacy Models LM-iD.1 (no longer fitted) | 0 |
 | `WAVESHARE_IR_ACTIVE_LOW = True` | Waveshare IR reflective | 0 |
 | `BAZAUTO_BD_ACTIVE_LOW = False` | `bazauto/block-detection` rev 1.0 | 1 |
 
 | Board | Device | Output |
 |---|---|---|
-| 1 (`0x20`) | Legacy Models LM-iD.1 | Open-drain. **Idles at 5 V if Input A is ever powered** — which is what every manufacturer datasheet tells you to do |
+| 1 (`0x20`) | `bazauto/block-detection` rev 1.0 | Push-pull 3.3 V, active high. Replaced the LM-iD.1, which is open-drain and **idles at 5 V if Input A is ever powered** |
 | 2 (`0x21`) | Waveshare IR reflective | LM393 open-collector with an on-board pull-up to its own 3.3 V VCC. Safe on an expander input directly |
 
 **`docs/block-detector-wiring.md` is the whole picture**, and the place to read before
 changing anything about how either is wired.
 
-**A broken wire therefore reads as `clear`, not `occupied`** — the failure lands on the
+**On board 2, a broken wire therefore reads as `clear`, not `occupied`** — the failure lands on the
 permissive state, and the 30 s re-assert cannot catch it because the node is alive and happily
 republishing. Accepted knowingly; see #9 for why, and for the closed-circuit alternatives —
 one of which `docs/block-detector-wiring.md` shows is available after all.

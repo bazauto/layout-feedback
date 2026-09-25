@@ -54,18 +54,22 @@ def test_pin_n_is_the_same_block_on_both_boards():
         assert cs[pin] == block, "pin %d names different blocks on the two boards" % pin
 
 
-def test_the_installed_sensors_are_active_low():
-    """Both Goods Shed devices are switches to ground: occupied reads 0.
-
-    Confirmed by scanning all 32 pins with a loco in the block and again with it
-    removed. Note the consequence recorded in #9: a broken wire floats to the pull-up
-    and therefore reads `clear`, which is the permissive state, not the safe one.
-    Swapping `cs---goods-shed` to the bazauto/block-detection board changes this.
-    """
+def test_the_installed_sensors_have_their_devices_polarity():
+    """Goods Shed's detector is the bazauto/block-detection board, occupied reads 1; its
+    beam is a Waveshare IR switch to ground, triggered reads 0."""
     by_id = {e["sensor_id"]: e for e in select_installed(config.SENSORS, config.INSTALLED)}
 
-    assert by_id["cs---goods-shed"]["active_low"] is config.LM_ID_ACTIVE_LOW is True
+    assert by_id["cs---goods-shed"]["active_low"] is config.BAZAUTO_BD_ACTIVE_LOW is False
     assert by_id["ir---goods-shed"]["active_low"] is config.WAVESHARE_IR_ACTIVE_LOW is True
+
+
+def test_every_current_sensor_uses_the_bazauto_detector_polarity():
+    """Board 1 is all bazauto/block-detection. A `cs---` entry left on the LM-iD.1's
+    polarity would read upside down the moment it is added to INSTALLED: an empty block
+    published as occupied, and — worse — an occupied one as clear."""
+    for entry in config.SENSORS:
+        if entry["expander"] == config.EXPANDER_CS:
+            assert entry["active_low"] is config.BAZAUTO_BD_ACTIVE_LOW, entry["sensor_id"]
 
 
 def test_the_bazauto_detector_is_active_high():
