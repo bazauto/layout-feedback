@@ -111,13 +111,14 @@ SENSORS = (
      "active_low": WAVESHARE_IR_ACTIVE_LOW},
 )
 
-# Physically wired, and therefore the only sensors published. Both on Goods Shed, which
-# is the one block with both a detector and a beam — so the bring-up exercises the
-# occupancy derivation rather than one sensor in isolation. Every board 1 entry above is
+# Physically wired, and therefore the only sensors published. The Goods Shed detector
+# was taken out of service 2026-09-25 when its LM-iD.1 was removed; its beam stays. A
+# block whose only live sensor is IR can go occupied but never clear, because an
+# `ir_position` `clear` is a no-op downstream. Every board 1 entry above is
 # already on the bazauto/block-detection polarity, so bringing another detector online is
 # only a matter of adding its id here.
 INSTALLED = (
-    "cs---goods-shed",
+    "cs---engine-shed-2",
     "ir---goods-shed",
 )
 

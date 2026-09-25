@@ -77,8 +77,8 @@ means it is running. The codes are in `docs/startup-and-status-led.md`.
 
 ## Status
 
-The IO node is deployed and working end to end. Both Goods Shed sensors, one current-sensing
-and one IR, publish contract readings that the orchestrator trusts.
+The IO node is deployed and working end to end. Two sensors publish contract readings: the
+Engine Shed 2 current detector and the Goods Shed IR beam.
 
 Still open:
 

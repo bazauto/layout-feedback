@@ -27,18 +27,21 @@ def test_the_layout_id_is_real():
     assert config.LAYOUT_ID == "c4e587aa-478d-46ab-a1df-9dd8359fc040"
 
 
-def test_both_installed_sensors_are_the_goods_shed_pair():
-    """The one block with both a detector and a beam, so the bring-up exercises the
-    occupancy derivation rather than one sensor in isolation."""
-    assert set(config.INSTALLED) == {"cs---goods-shed", "ir---goods-shed"}
+def test_every_installed_sensor_is_on_the_board_its_prefix_names():
+    """`cs---` is current sensing on board 1, `ir---` is IR on board 2. A sensor on the
+    wrong board would be read with the other device's polarity, upside down.
+
+    Deliberately not a snapshot of INSTALLED: bringing a sensor online is a config change
+    and should not also need a test edit."""
+    board_for = {"cs---": config.EXPANDER_CS, "ir---": config.EXPANDER_IR}
+    for entry in select_installed(config.SENSORS, config.INSTALLED):
+        prefix = entry["sensor_id"][:len("cs---")]
+        assert prefix in board_for, entry["sensor_id"]
+        assert entry["expander"] == board_for[prefix], entry["sensor_id"]
 
 
-def test_installed_sensors_resolve_to_the_documented_pins():
-    """docs/pin-allocation.md: both on pin 8, board 1 for CS and board 2 for IR."""
-    by_id = {e["sensor_id"]: e for e in select_installed(config.SENSORS, config.INSTALLED)}
-
-    assert (by_id["cs---goods-shed"]["expander"], by_id["cs---goods-shed"]["pin"]) == (0x20, 8)
-    assert (by_id["ir---goods-shed"]["expander"], by_id["ir---goods-shed"]["pin"]) == (0x21, 8)
+def test_installed_sensors_are_not_duplicated():
+    assert len(set(config.INSTALLED)) == len(config.INSTALLED)
 
 
 def test_pin_n_is_the_same_block_on_both_boards():
@@ -55,12 +58,14 @@ def test_pin_n_is_the_same_block_on_both_boards():
 
 
 def test_the_installed_sensors_have_their_devices_polarity():
-    """Goods Shed's detector is the bazauto/block-detection board, occupied reads 1; its
-    beam is a Waveshare IR switch to ground, triggered reads 0."""
-    by_id = {e["sensor_id"]: e for e in select_installed(config.SENSORS, config.INSTALLED)}
-
-    assert by_id["cs---goods-shed"]["active_low"] is config.BAZAUTO_BD_ACTIVE_LOW is False
-    assert by_id["ir---goods-shed"]["active_low"] is config.WAVESHARE_IR_ACTIVE_LOW is True
+    """Detectors are the bazauto/block-detection board, occupied reads 1; beams are
+    Waveshare IR switches to ground, triggered reads 0."""
+    expected = {config.EXPANDER_CS: config.BAZAUTO_BD_ACTIVE_LOW,
+                config.EXPANDER_IR: config.WAVESHARE_IR_ACTIVE_LOW}
+    assert config.BAZAUTO_BD_ACTIVE_LOW is False
+    assert config.WAVESHARE_IR_ACTIVE_LOW is True
+    for entry in select_installed(config.SENSORS, config.INSTALLED):
+        assert entry["active_low"] is expected[entry["expander"]], entry["sensor_id"]
 
 
 def test_every_current_sensor_uses_the_bazauto_detector_polarity():

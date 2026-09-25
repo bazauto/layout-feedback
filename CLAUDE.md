@@ -109,8 +109,9 @@ bench check that covers it instead. Do not leave it silently untested.
 
 ## Current state (2026-08)
 
-The IO node is **deployed and working end to end** (#1, #2, #3). Both Goods Shed sensors
-publish contract readings that the orchestrator trusts, and the block follows them.
+The IO node is **deployed and working end to end** (#1, #2, #3). Installed: `cs---engine-shed-2`
+(a `bazauto/block-detection` channel) and `ir---goods-shed`. Goods Shed has lost its detector,
+so that block can go occupied but not clear (`docs/pin-allocation.md`).
 
 Point position feedback on board 3 (`0x22`) is **built but publishes nothing yet** (#15): the
 expander answers on the bus but `POINTS_INSTALLED` is empty, and **the feedback source is
