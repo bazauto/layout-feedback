@@ -46,23 +46,26 @@ EXPANDER_POINTS = 0x22
 # Output polarity, per device. Polarity belongs to the device on the far end of the wire,
 # not to the board or the node, so every SENSORS entry names the device it is.
 #
-# The two fitted devices are switches to ground: closed (conducting) when asserting,
-# open otherwise, with the MCP23017's internal pull-up holding the line high when open.
-# So occupied reads 0. Confirmed on the bench 2026-08-23 by scanning all 32 pins with a
-# loco in Goods Shed and again with it removed — pin 8 on both boards was the only one
-# that moved.
+# The Waveshare IR modules on board 2 are switches to ground: closed (conducting) when
+# triggered, open otherwise, with the MCP23017's internal pull-up holding the line high
+# when open. So triggered reads 0. Confirmed on the bench 2026-08-23 by scanning all 32
+# pins with a loco in Goods Shed and again with it removed.
 #
-# **For both, a broken wire reads as `clear`, not `occupied`** (#9). The pull-up gives a
-# defined level on an open circuit, but that level is the permissive one, so a severed
-# wire asserts empty track and the re-assert keeps confirming it.
-LM_ID_ACTIVE_LOW = True         # Legacy Models LM-iD.1, board 1: pulls to 0 V occupied
+# **For the IR, a broken wire reads as `clear`, not `occupied`** (#9). The pull-up gives a
+# defined level on an open circuit, but that level is the permissive one.
 WAVESHARE_IR_ACTIVE_LOW = True  # Waveshare IR (LM393), board 2: pulls to 0 V triggered
 
 # The bazauto/block-detection board drives its output push-pull: 3.3 V occupied, 0 V
 # clear. Against the pull-up a broken signal wire therefore reads **occupied** — the fix
-# for #9 on board 1. Not yet fitted to any sensor. Swap a board 1 entry to it only once
-# that channel has passed its wire-pull check on the bench (see #9).
+# for #9 on board 1. Every board 1 entry uses it as of 2026-09-25, when the LM-iD.1 on
+# Goods Shed was removed. The pull-up must stay on for these inputs, or a broken wire
+# floats instead of reading occupied.
 BAZAUTO_BD_ACTIVE_LOW = False
+
+# Legacy Models LM-iD.1: pulls to 0 V occupied. **No longer fitted** — board 1 is all
+# bazauto/block-detection now. Kept so that refitting one is a visible, one-line change
+# rather than a guess; see docs/block-detector-wiring.md before doing so.
+LM_ID_ACTIVE_LOW = True
 
 DEBOUNCE_MS = 200
 
@@ -71,23 +74,23 @@ DEBOUNCE_MS = 200
 SENSORS = (
     # --- board 1, current sensing (block_detection) ---
     {"sensor_id": "cs---fiddle-yard-1", "expander": EXPANDER_CS, "pin": 0,
-     "active_low": LM_ID_ACTIVE_LOW},
+     "active_low": BAZAUTO_BD_ACTIVE_LOW},
     {"sensor_id": "cs---fiddle-yard-2", "expander": EXPANDER_CS, "pin": 1,
-     "active_low": LM_ID_ACTIVE_LOW},
+     "active_low": BAZAUTO_BD_ACTIVE_LOW},
     {"sensor_id": "cs---siding-1", "expander": EXPANDER_CS, "pin": 2,
-     "active_low": LM_ID_ACTIVE_LOW},
+     "active_low": BAZAUTO_BD_ACTIVE_LOW},
     {"sensor_id": "cs---siding-2", "expander": EXPANDER_CS, "pin": 3,
-     "active_low": LM_ID_ACTIVE_LOW},
+     "active_low": BAZAUTO_BD_ACTIVE_LOW},
     {"sensor_id": "cs---siding-3", "expander": EXPANDER_CS, "pin": 4,
-     "active_low": LM_ID_ACTIVE_LOW},
+     "active_low": BAZAUTO_BD_ACTIVE_LOW},
     {"sensor_id": "cs---engine-goods-transfer", "expander": EXPANDER_CS, "pin": 5,
-     "active_low": LM_ID_ACTIVE_LOW},
+     "active_low": BAZAUTO_BD_ACTIVE_LOW},
     {"sensor_id": "cs---engine-shed-1", "expander": EXPANDER_CS, "pin": 6,
-     "active_low": LM_ID_ACTIVE_LOW},
+     "active_low": BAZAUTO_BD_ACTIVE_LOW},
     {"sensor_id": "cs---engine-shed-2", "expander": EXPANDER_CS, "pin": 7,
-     "active_low": LM_ID_ACTIVE_LOW},
+     "active_low": BAZAUTO_BD_ACTIVE_LOW},
     {"sensor_id": "cs---goods-shed", "expander": EXPANDER_CS, "pin": 8,
-     "active_low": LM_ID_ACTIVE_LOW},
+     "active_low": BAZAUTO_BD_ACTIVE_LOW},
     # --- board 2, IR (ir_position) ---
     {"sensor_id": "ir---fiddle-yard-1", "expander": EXPANDER_IR, "pin": 0,
      "active_low": WAVESHARE_IR_ACTIVE_LOW},
@@ -110,7 +113,9 @@ SENSORS = (
 
 # Physically wired, and therefore the only sensors published. Both on Goods Shed, which
 # is the one block with both a detector and a beam — so the bring-up exercises the
-# occupancy derivation rather than one sensor in isolation.
+# occupancy derivation rather than one sensor in isolation. Every board 1 entry above is
+# already on the bazauto/block-detection polarity, so bringing another detector online is
+# only a matter of adding its id here.
 INSTALLED = (
     "cs---goods-shed",
     "ir---goods-shed",

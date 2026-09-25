@@ -40,7 +40,7 @@ exist yet; see [#4](https://github.com/bazauto/layout-feedback/issues/4).
 | PN7150 NFC | I2C1, SDA=GP2 SCL=GP3, `0x28` | NCI + IRQ. The IRQ means "a message is ready", not "a tag is present" |
 | TCA9548A mux | I2C1, `0x70` | Fans I2C1 out to up to 8 readers |
 | ESP-AT modem | UART1, TX=GP8 RX=GP9, 9600 | Wired ethernet; reports `+ETH_GOT_IP` when ready |
-| Legacy Models LM-iD.1 | board 1 inputs | The current-sensing detectors, active low. Output stage and its two modes: `docs/block-detector-wiring.md` |
+| `bazauto/block-detection` rev 1.0 | board 1 inputs | The current-sensing detectors, push-pull, active high, so a broken signal wire reads occupied. Replaced the LM-iD.1 (`docs/block-detector-wiring.md`) |
 | Waveshare IR reflective | board 2 inputs | LM393, run at 3.3 V, active low |
 | Cobalt iP Digital points | board 3 (`0x22`), planned | Commanded over DCC, never MQTT, and can report nothing itself. Neither changeover is free (`S2` powers the frog), so the feedback source is undecided. See `docs/point-position-feedback.md` |
 
